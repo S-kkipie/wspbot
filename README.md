@@ -418,10 +418,15 @@ until they fit WhatsApp's ceilings — 100KB static, 500KB animated — since an
 is rejected.
 
 **Drawn from a description.** Ask for a sticker of something that does not exist — "a sleepy
-capybara in sunglasses" — and it draws one. The image is generated with a **transparent
-background**, which is the whole trick: without it every drawn sticker arrives as a square photo
-on a white card and looks broken next to real ones. The prompt supplies the sticker styling
-(bold outlines, flat colour, one centred subject), so you only describe the subject.
+capybara in sunglasses" — and it draws one. The image needs a **transparent background**, which
+is the whole trick: without it every drawn sticker arrives as a square photo on a white card and
+looks broken next to real ones. `lib/provider.ts` `drawImage` gets there two different ways
+depending on `AI_PROVIDER`: OpenAI's `gpt-image-*` takes a `background: "transparent"` option and
+hands back real alpha directly; Gemini's image models have no such option at all — asking one in
+plain English for a "transparent background" returns a literal painted checkerboard, not alpha —
+so the Gemini prompt asks for a flat magenta backdrop instead and `lib/sticker-maker.ts`
+`dropChromaKey` cuts it out with ffmpeg afterwards. Either way the prompt supplies the sticker
+styling (bold outlines, flat colour, one centred subject), so you only describe the subject.
 
 Drawing invents; it does not find. For a specific meme, a real person, or an existing picture
 the bot searches instead and uses the link path below — the prompt tells it to pick by whether
@@ -786,7 +791,7 @@ insert into memories (chat, text) values ('global', 'the office wifi password is
 | `GEMINI_API_KEY` | — | Required while `AI_PROVIDER` is `google`. From [aistudio.google.com/apikey](https://aistudio.google.com/apikey). |
 | `BOT_MODEL` | `gemini-2.5-flash` | Any model your key can reach on the selected provider. |
 | `BOT_VISION_MODEL` | `BOT_MODEL` | Naming a sticker is narrow work and can run on a cheaper tier. |
-| `BOT_IMAGE_MODEL` | `gpt-image-1` | OpenAI-only — must support a transparent background. Unused while `AI_PROVIDER` is `google`; drawing stickers is phase 2 under Gemini. |
+| `BOT_IMAGE_MODEL` | `gemini-2.5-flash-image` (google) / `gpt-image-1` (openai) | Image model for drawn stickers, read by `lib/provider.ts` `drawImage`. Under `openai` it must support a transparent background; under `google` it is keyed out afterwards instead — see `lib/sticker-maker.ts` `dropChromaKey`. |
 | `BOT_EFFORT` | `low` | Reasoning depth: `minimal`/`low`/`medium`/`high`. Under Gemini, mapped to a thinking-token budget (0/1024/8192/24576). |
 | `BOT_REPLY_TO_DMS` | `false` | Answer one-to-one chats too. Groups always require a tag regardless. |
 | `BOT_GROUP_ALLOWLIST` | — | Comma-separated group JIDs the bot may act in. Empty blocks every group — see `lib/allowlist.ts`. |

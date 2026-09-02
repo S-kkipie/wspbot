@@ -126,9 +126,18 @@ like a simplification opportunity.
 - **Never `fetch` a model-supplied URL directly.** `lib/fetch-media.ts` resolves and rejects
   private ranges before connecting and re-validates every redirect hop; a public URL can redirect
   to `169.254.169.254`.
-- **A drawn sticker needs `background: "transparent"`.** Without it the image comes back on a
-  white card and looks broken beside real stickers — and nothing in a typecheck catches that.
-  `npm run draw-check` generates one and verifies the alpha channel survives.
+- **A drawn sticker needs a real alpha channel.** Without it the image comes back on a white (or
+  magenta, or checkerboard) card and looks broken beside real stickers — and nothing in a
+  typecheck catches that. `npm run draw-check` generates one and verifies the alpha channel
+  survives. OpenAI's `gpt-image-*` gets there with `background: "transparent"` and hands back real
+  alpha directly. **Gemini's image models have no such option, full stop** — ask one in plain
+  English for a "transparent background" and it paints a literal checkerboard, because that is
+  what transparency looks like in an image editor, not what it means. `lib/provider.ts`
+  `drawImage`'s Gemini branch asks for a flat magenta backdrop instead and
+  `lib/sticker-maker.ts` `dropChromaKey` keys it out with ffmpeg afterwards — magenta rather than
+  the more common green-screen colour because a sticker's subject is far more likely to *need*
+  green (a cactus, a dinosaur, a creeper) than magenta, and keying out a colour the subject also
+  wears eats holes in it.
 - **A reply carries a full copy of what it replies to**, in `contextInfo.quotedMessage` — keys
   included, so quoted media decrypts exactly like a top-level attachment. That copy is the whole
   point of a reply: the words rarely carry the meaning without it.
