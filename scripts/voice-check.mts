@@ -3,7 +3,10 @@
  * Web and not in the mobile app. A voice note has to be Opus in an Ogg container, mono, 48kHz.
  *
  * Verifies the encoder output with ffprobe rather than trusting the extension. Runs offline
- * against a synthetic tone; add OPENAI_API_KEY to also put a real TTS clip through it.
+ * against a synthetic tone; add OPENAI_API_KEY and/or GEMINI_API_KEY to also put a real TTS clip
+ * from each configured provider through it — both matter now that `lib/provider.ts` `speak` has
+ * a Gemini branch too, and Gemini's TTS returns WAV-wrapped PCM rather than OpenAI's own output,
+ * a different shape worth actually exercising rather than assuming `toVoiceNote` handles it.
  *
  *   npm run voice-check
  */
@@ -72,7 +75,7 @@ const main = async () => {
   verify("mp3-sourced", await toVoiceNote(readFileSync(mp3)));
 
   if (process.env["OPENAI_API_KEY"]) {
-    console.log("\nreal TTS clip:");
+    console.log("\nreal TTS clip (openai):");
     const { generateSpeech } = await import("ai");
     const { createOpenAI } = await import("@ai-sdk/openai");
     const openai = createOpenAI({ apiKey: process.env["OPENAI_API_KEY"]! });
@@ -83,9 +86,26 @@ const main = async () => {
       outputFormat: "wav",
     });
     console.log("    tts returned", speech.audio.mediaType, `${(speech.audio.uint8Array.length / 1024).toFixed(0)}KB`);
-    verify("tts", await toVoiceNote(Buffer.from(speech.audio.uint8Array)));
+    verify("tts-openai", await toVoiceNote(Buffer.from(speech.audio.uint8Array)));
   } else {
-    console.log("\nreal TTS clip: SKIPPED (no OPENAI_API_KEY)");
+    console.log("\nreal TTS clip (openai): SKIPPED (no OPENAI_API_KEY)");
+  }
+
+  if (process.env["GEMINI_API_KEY"]) {
+    console.log("\nreal TTS clip (google):");
+    const { generateSpeech } = await import("ai");
+    const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
+    const google = createGoogleGenerativeAI({ apiKey: process.env["GEMINI_API_KEY"]! });
+    const speech = await generateSpeech({
+      model: google.speech("gemini-2.5-flash-preview-tts"),
+      text: "Hola, esto es una nota de voz de prueba.",
+      voice: "Kore",
+      outputFormat: "wav",
+    });
+    console.log("    tts returned", speech.audio.mediaType, `${(speech.audio.uint8Array.length / 1024).toFixed(0)}KB`);
+    verify("tts-google", await toVoiceNote(Buffer.from(speech.audio.uint8Array)));
+  } else {
+    console.log("\nreal TTS clip (google): SKIPPED (no GEMINI_API_KEY)");
   }
 
   rmSync(dir, { recursive: true, force: true });

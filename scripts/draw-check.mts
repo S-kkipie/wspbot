@@ -1,10 +1,17 @@
 /**
- * Proves the drawn-sticker path end to end, short of sending: generate an image with a
- * transparent background, run it through the sticker encoder, and confirm the result is a
- * 512x512 WebP that actually kept its alpha channel.
+ * Proves the drawn-sticker path end to end, short of sending: generate an image, run it through
+ * the same transparency step `lib/provider.ts` `drawImage` and `lib/stickers.ts` `createFromPrompt`
+ * use, then the sticker encoder, and confirm the result is a 512x512 WebP that actually kept its
+ * alpha channel.
  *
  * Transparency is the whole point. Without it every drawn sticker arrives as a square photo on
- * a white card, which looks broken next to real stickers — and that is invisible in a unit test.
+ * a white (or, under Gemini, magenta) card, which looks broken next to real stickers — and that
+ * is invisible in a unit test.
+ *
+ * Tests whichever provider `AI_PROVIDER` in `.env` names (default: google, matching
+ * `lib/config.ts`) — OpenAI gets a real `background: "transparent"`; Gemini has no such option
+ * and gets a chroma-key backdrop keyed out with `dropChromaKey` instead, so this exercises that
+ * ffmpeg step for real rather than assuming it works.
  *
  * Costs one real image generation, so it is deliberately not part of `npm run smoke`:
  *   npm run draw-check
@@ -12,8 +19,9 @@
 import { writeFileSync } from "node:fs";
 import { generateImage } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { readFileSync } from "node:fs";
-import { toSticker } from "../lib/sticker-maker.js";
+import { toSticker, dropChromaKey } from "../lib/sticker-maker.js";
 
 const env = Object.fromEntries(
   readFileSync("C:/Users/Ignac/Documentos/Github/wspbot/.env", "utf8")
@@ -51,29 +59,68 @@ const inspect = (b: Buffer) => {
   return { canvas, frames: frames || 1, kb: +(b.length / 1024).toFixed(1), chunks };
 };
 
-const STICKER_STYLE =
+const OPENAI_STYLE =
   "Sticker art: one clear subject, centred, bold clean outlines, simple flat shapes and vivid " +
   "colours. Fully transparent background. No drop shadow, no border, no frame, no background " +
   "scenery, and no text unless the request asks for words.";
 
+const CHROMA_KEY = "0xFF00FF";
+
+const GOOGLE_STYLE =
+  "Sticker art: one clear subject, centred, bold clean outlines, simple flat shapes and vivid " +
+  "colours. Background: a single solid flat colour filling every pixel behind the subject, pure " +
+  "magenta, hex FF00FF, RGB 255/0/255, with no gradient, no shading, no texture and no other " +
+  "colour in it anywhere. The subject itself must avoid magenta or pink tones so it stays " +
+  "distinct from the background. Sharp clean edges between the subject and the background, no " +
+  "soft blur. No drop shadow, no border, no frame, no other scenery, and no text unless the " +
+  "request asks for words.";
+
+const PROMPT = "a sleepy capybara wearing tiny sunglasses";
+
 const main = async () => {
-  const model = env["BOT_IMAGE_MODEL"] ?? "gpt-image-1";
-  console.log(`\ndrawing with ${model}…`);
+  const provider = env["AI_PROVIDER"] ?? "google";
+  const isGoogle = provider === "google";
+  const model =
+    env["BOT_IMAGE_MODEL"] ?? (isGoogle ? "gemini-2.5-flash-image" : "gpt-image-1");
+  console.log(`\ndrawing with ${provider}/${model}…`);
 
-  const openai = createOpenAI({ apiKey: env["OPENAI_API_KEY"]! });
-  const result = await generateImage({
-    model: openai.image(model),
-    prompt: `a sleepy capybara wearing tiny sunglasses\n\n${STICKER_STYLE}`,
-    size: "1024x1024",
-    providerOptions: {
-      openai: { background: "transparent", outputFormat: "png", quality: "medium" },
-    },
-  });
+  let raw: Buffer;
+  if (isGoogle) {
+    const google = createGoogleGenerativeAI({ apiKey: env["GEMINI_API_KEY"]! });
+    const result = await generateImage({
+      model: google.image(model),
+      prompt: `${PROMPT}\n\n${GOOGLE_STYLE}`,
+      aspectRatio: "1:1",
+    });
+    raw = Buffer.from(result.image.uint8Array);
+    console.log(`    generated ${(raw.length / 1024).toFixed(0)}KB ${result.image.mediaType}`);
+    console.log(`    warnings: ${JSON.stringify(result.warnings)}`);
+    console.log(`    usage: ${JSON.stringify(result.usage)}`);
+  } else {
+    const openai = createOpenAI({ apiKey: env["OPENAI_API_KEY"]! });
+    const result = await generateImage({
+      model: openai.image(model),
+      prompt: `${PROMPT}\n\n${OPENAI_STYLE}`,
+      size: "1024x1024",
+      providerOptions: {
+        openai: { background: "transparent", outputFormat: "png", quality: "medium" },
+      },
+    });
+    raw = Buffer.from(result.image.uint8Array);
+    console.log(`    generated ${(raw.length / 1024).toFixed(0)}KB ${result.image.mediaType}`);
+    console.log(`    warnings: ${JSON.stringify(result.warnings)}`);
+    console.log(`    usage: ${JSON.stringify(result.usage)}`);
+  }
 
-  const png = Buffer.from(result.image.uint8Array);
-  console.log(`    generated ${(png.length / 1024).toFixed(0)}KB ${result.image.mediaType}`);
-  console.log(`    warnings: ${JSON.stringify(result.warnings)}`);
-  console.log(`    usage: ${JSON.stringify(result.usage)}`);
+  // Gemini's raw output has no alpha at all yet — that is expected here, not a failure — so the
+  // chroma-key step runs first and the alpha assertion below applies to what comes out of it,
+  // exactly like lib/stickers.ts createFromPrompt does.
+  const png = isGoogle ? await dropChromaKey(raw, CHROMA_KEY) : raw;
+  if (isGoogle) {
+    const rawOut = "C:/Users/Ignac/AppData/Local/Temp/claude/drawn-sticker-raw-chromakey.png";
+    writeFileSync(rawOut, raw);
+    console.log(`    wrote ${rawOut} — the pre-cutout chroma-key render, for judging edge quality`);
+  }
 
   // A PNG keeps alpha in its colour type: 6 = RGBA, 4 = grey+alpha.
   const colourType = png[25];
