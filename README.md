@@ -38,7 +38,7 @@ bot   → Done.
 | **Abilities** | 18 switchable features over 32 model tools, plus 3 that are always on |
 | **Storage** | Postgres, 13 tables — memory, history, stickers, schedules, spend |
 | **Runs on** | A Dokploy VPS behind Traefik, alongside the WhatsApp gateway it talks to |
-| **Guarded by** | 13 check scripts that exercise the real thing rather than asserting about it |
+| **Guarded by** | 14 check scripts that exercise the real thing rather than asserting about it |
 
 ## Contents
 
@@ -782,13 +782,16 @@ insert into memories (chat, text) values ('global', 'the office wifi password is
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `BOT_MODEL` | `gpt-5.6` | The gpt-5.6 tiers are capability-identical; `-terra` is ~60% cheaper than `-sol`, `-luna` ~96%. |
+| `AI_PROVIDER` | `google` | `google` or `openai`, read by `lib/provider.ts`. Every model call in the app goes through it, so this is the whole switch. |
+| `GEMINI_API_KEY` | — | Required while `AI_PROVIDER` is `google`. From [aistudio.google.com/apikey](https://aistudio.google.com/apikey). |
+| `BOT_MODEL` | `gemini-2.5-flash` | Any model your key can reach on the selected provider. |
 | `BOT_VISION_MODEL` | `BOT_MODEL` | Naming a sticker is narrow work and can run on a cheaper tier. |
-| `BOT_IMAGE_MODEL` | `gpt-image-1` | Must support a transparent background. `-mini` is ~80% cheaper. |
-| `BOT_EFFORT` | `low` | Reasoning depth. Raise it if answers feel shallow, at the cost of latency. |
+| `BOT_IMAGE_MODEL` | `gpt-image-1` | OpenAI-only — must support a transparent background. Unused while `AI_PROVIDER` is `google`; drawing stickers is phase 2 under Gemini. |
+| `BOT_EFFORT` | `low` | Reasoning depth: `minimal`/`low`/`medium`/`high`. Under Gemini, mapped to a thinking-token budget (0/1024/8192/24576). |
 | `BOT_REPLY_TO_DMS` | `false` | Answer one-to-one chats too. Groups always require a tag regardless. |
+| `BOT_GROUP_ALLOWLIST` | — | Comma-separated group JIDs the bot may act in. Empty blocks every group — see `lib/allowlist.ts`. |
 | `BOT_TIMEZONE` | `UTC` | What "9am" means. Reminders and summary schedules are wrong without it. |
-| `BOT_SUMMARY_MODEL` | `gpt-5.6-sol` | Writes the scheduled digests. Worth the top tier: it runs rarely, on a long transcript, and a digest that drops the decision is worse than none. |
+| `BOT_SUMMARY_MODEL` | `gemini-2.5-flash` | Writes the scheduled digests. Worth the top tier: it runs rarely, on a long transcript, and a digest that drops the decision is worse than none. |
 | `BOT_RATE_LIMIT_PER_MINUTE` | `1` | Default allowance per person. Override individuals on `/dashboard/limits`. |
 
 Replies are requested at low verbosity — a WhatsApp message that needs scrolling has already
@@ -798,6 +801,7 @@ failed. The bot's manners live in the system prompt in `lib/agent.ts`.
 
 ```bash
 npm run smoke           # signatures, "is this message for me?", what the gate covers — no keys
+npm run allowlist-check # which chats the bot may act in at all — no keys, no database
 npm run features-check  # every tool belongs to a switch, and every switch does something
 npm run wapi-check      # the vendored SDK against the real wapi API (needs WAPI_API_KEY)
 npm run cron-check      # the cron evaluator, including both daylight-saving transitions

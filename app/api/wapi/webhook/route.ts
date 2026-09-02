@@ -4,6 +4,7 @@ import { config } from "@/lib/config";
 import { query } from "@/lib/db";
 import { wapi, type MessageKey } from "@/lib/wapi";
 import { reply, clearHistory } from "@/lib/agent";
+import { isAllowedChat } from "@/lib/allowlist";
 import * as mentions from "@/lib/mentions";
 import * as stickers from "@/lib/stickers";
 import { ensureConnected } from "@/lib/session";
@@ -98,6 +99,24 @@ async function handle({ event, data }: WebhookBody): Promise<void> {
 
   const message = mentions.parse(data);
   if (!message) return;
+
+  /**
+   * The group allowlist: dropped here, before mentions, capture or recording are even
+   * considered, and after `verify()` has already run in `POST`. The HTTP response is already a
+   * 200 by this point — `handle()` only runs inside `after()` — so this is a silent ack with no
+   * reply, not a different status code. DMs are unaffected: they are governed by
+   * `BOT_REPLY_TO_DMS`, which `isAllowedChat` checks on its own.
+   */
+  if (
+    !isAllowedChat(
+      message.chat,
+      config.groupAllowlist(),
+      !message.isGroup,
+      config.replyToDms(),
+    )
+  ) {
+    return;
+  }
 
   const me = await wapi.meCached();
   const identity = mentions.identityOf(me);

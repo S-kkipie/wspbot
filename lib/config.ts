@@ -167,4 +167,18 @@ export const config = {
    * signal when it is wanted, so it would answer everything anyone sent it.
    */
   replyToDms: () => (optional("BOT_REPLY_TO_DMS") ?? "false") === "true",
+
+  /**
+   * Which groups the bot may act in, comma-separated JIDs. Unset or empty means no group is
+   * allowed — an allowlist that admits everyone until configured would let a fresh deployment
+   * answer in every group it is added to, which is the opposite of what "allowlist" promises.
+   */
+  groupAllowlist: (): string[] => {
+    const raw = optional("BOT_GROUP_ALLOWLIST");
+    if (!raw) return [];
+    return raw
+      .split(",")
+      .map((jid) => jid.trim())
+      .filter(Boolean);
+  },
 };

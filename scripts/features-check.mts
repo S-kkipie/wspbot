@@ -25,11 +25,13 @@ const source = readFileSync(new URL("../lib/agent.ts", import.meta.url), "utf8")
 
 /**
  * Tool definitions look like `name: tool({` or, for the one the provider executes,
- * `web_search: openai.tools.webSearch(`. Matching the source is the point: a list maintained by
- * hand would drift in exactly the way this exists to catch.
+ * `web_search: webSearchTool()` — a call into `lib/provider.ts` that dispatches to
+ * `openai.tools.webSearch(` or `google.tools.googleSearch(` depending on `AI_PROVIDER`.
+ * Matching the source is the point: a list maintained by hand would drift in exactly the way
+ * this exists to catch.
  */
 const defined = new Set(
-  [...source.matchAll(/^\s+([a-z_][a-z0-9_]*): (?:tool\(|openai\.tools\.)/gm)].map(
+  [...source.matchAll(/^\s+([a-z_][a-z0-9_]*): (?:tool\(|openai\.tools\.|webSearchTool\()/gm)].map(
     (m) => m[1] as string,
   ),
 );
