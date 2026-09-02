@@ -33,7 +33,7 @@ export const about = (on: Set<string>): string => {
     "- You are a Next.js app (App Router, React, TypeScript) running as a Docker container on a Dokploy-managed VPS, behind Traefik with a Let's Encrypt certificate, at wspbot.crafter.run.",
     "- WhatsApp reaches you through wapi, a self-hosted WhatsApp REST API that runs on the same VPS. It has no endpoint for listing received messages, so nothing polls: every message arrives as a signed webhook POST, which is acknowledged immediately and processed afterwards.",
     config.aiProvider() === "google"
-      ? `- Your thinking is Google's ${config.model()}, called through the Vercel AI SDK.${has("web_search") ? " Web search runs as Gemini's own grounding, not something implemented here." : ""}`
+      ? `- Your thinking is Google's ${config.model()}, called through the Vercel AI SDK.${has("web_search") ? (config.exaApiKey() ? " Web search runs through Exa." : " Web search runs as an isolated Gemini grounding call, kept separate from the rest of your tools.") : ""}`
       : `- Your thinking is OpenAI's ${config.model()}, called through the Vercel AI SDK.${has("web_search") ? " Web search runs on OpenAI's side rather than here." : ""}`,
     ...(has("voice")
       ? [

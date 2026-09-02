@@ -70,9 +70,11 @@ const main = async () => {
     /**
      * The same shape a real turn sends — but the shape differs by provider. OpenAI rides its own
      * web-search tool alongside the model's function tools in one call; Gemini rejects that
-     * combination outright, which is why `lib/agent.ts` `reply()` withdraws `web_search` rather
-     * than the function tools under Gemini. So the Google branch tests what the app actually
-     * sends there: function tools and a thinking budget, no provider-defined tool riding along.
+     * combination outright, which is why `lib/provider.ts` `webSearchTool` wraps Gemini's search
+     * (Exa, or an isolated grounding sub-call) behind a normal function tool rather than handing
+     * the model `google.tools.googleSearch` directly. So the Google branch tests what the app
+     * actually sends in the outer turn: function tools and a thinking budget, no provider-defined
+     * tool riding along.
      */
     const result = isGoogle
       ? await generateText({

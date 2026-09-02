@@ -24,11 +24,12 @@ const UNSWITCHABLE = new Set<string>([]);
 const source = readFileSync(new URL("../lib/agent.ts", import.meta.url), "utf8");
 
 /**
- * Tool definitions look like `name: tool({` or, for the one the provider executes,
- * `web_search: webSearchTool()` — a call into `lib/provider.ts` that dispatches to
- * `openai.tools.webSearch(` or `google.tools.googleSearch(` depending on `AI_PROVIDER`.
- * Matching the source is the point: a list maintained by hand would drift in exactly the way
- * this exists to catch.
+ * Tool definitions look like `name: tool({` or, for search, `web_search: webSearchTool()` — a
+ * call into `lib/provider.ts` that returns OpenAI's hosted `openai.tools.webSearch(` unchanged
+ * under `AI_PROVIDER=openai`, and under `AI_PROVIDER=google` a normal function tool (built with
+ * `tool(` internally, but returned rather than defined inline here) that reaches Exa or an
+ * isolated Gemini grounding call. Matching the source is the point: a list maintained by hand
+ * would drift in exactly the way this exists to catch.
  */
 const defined = new Set(
   [...source.matchAll(/^\s+([a-z_][a-z0-9_]*): (?:tool\(|openai\.tools\.|webSearchTool\()/gm)].map(

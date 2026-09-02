@@ -107,6 +107,13 @@ export const config = {
   /** Gemini's key. Required only while `aiProvider()` is "google", which is the default. */
   geminiApiKey: () => optional("GEMINI_API_KEY"),
 
+  /**
+   * Exa's key, for `web_search` under Gemini. Optional: without it, `webSearchTool` falls back
+   * to an isolated Gemini grounding sub-call instead (see `lib/provider.ts` `groundedSearch`).
+   * Not used by the OpenAI branch, which has its own hosted web-search tool.
+   */
+  exaApiKey: () => optional("EXA_API_KEY"),
+
   /** Any model your account can reach on the selected provider. */
   model: () => optional("BOT_MODEL") ?? "gemini-2.5-flash",
 

@@ -1234,19 +1234,14 @@ export const reply = async (turn: Turn): Promise<Reply> => {
    */
   const on = await features.enabled();
   /**
-   * Voice and drawn stickers both now have a Gemini path (see `lib/provider.ts` `speak` and
-   * `drawImage`), so only `web_search` still needs masking out here. Gemini rejects "combination
-   * of function and provider-defined tools": the model's own function tools (memory, media,
-   * polls…) cannot ride alongside the provider-defined `googleSearch` grounding tool in one
-   * request. The function tools are the point, so the grounding tool is the one that goes.
-   * Deleting "web_search" from `on` before anything else reads it withdraws both the tool (via
-   * `features.withdraw` below) and the prompt section that describes it — `systemPrompt` and
-   * `about()` read this same set, so the model never offers what it cannot deliver under Gemini.
-   * The database switch is left alone; this only overrides what it means at runtime.
+   * Voice, drawn stickers, and web search all now have a Gemini path (see `lib/provider.ts`
+   * `speak`, `drawImage`, and `webSearchTool`), so nothing needs masking out here anymore.
+   * `web_search` used to be deleted from `on` under Gemini because the provider-defined
+   * `googleSearch` grounding tool cannot ride alongside this app's function tools in one
+   * request — but `webSearchTool` no longer hands that tool to the model directly; it wraps it
+   * (or Exa, when `EXA_API_KEY` is set) behind a normal function tool, so the restriction never
+   * applies here. The database switch is read as-is.
    */
-  if (config.aiProvider() === "google") {
-    on.delete("web_search");
-  }
   const content = await buildUserContent(turn, on);
   const history = await loadHistory(turn.chat);
   const sent: string[] = [];

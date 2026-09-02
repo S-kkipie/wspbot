@@ -1,6 +1,7 @@
 import "server-only";
 import type { Tool } from "ai";
-import { generateImage, generateSpeech } from "ai";
+import { generateImage, generateSpeech, generateText, tool } from "ai";
+import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { config } from "./config";
@@ -60,23 +61,108 @@ export function reasoningProviderOptions(effort: string): Record<string, JsonRec
 }
 
 /**
- * Provider-executed web search — both sides run the search themselves and hand back grounded
- * text, so there is no result shape for this codebase to parse and nothing here for a provider
- * switch to break beyond this one factory call.
+ * Exa's REST search — a purpose-built search API, and the preferred backend for `web_search`
+ * under Gemini when `EXA_API_KEY` is configured (see `webSearchTool` below). Formats results
+ * into a compact block the model can read and cite: a title, the bare URL, and a short snippet
+ * per result. Throws on any failure; `webSearchTool`'s `execute` is what turns that into a
+ * string handed back to the model, per this app's convention of returning tool failures rather
+ * than throwing them into the turn.
+ */
+async function exaSearch(searchQuery: string): Promise<string> {
+  const res = await fetch("https://api.exa.ai/search", {
+    method: "POST",
+    headers: {
+      "x-api-key": config.exaApiKey()!,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      query: searchQuery,
+      numResults: 5,
+      type: "auto",
+      contents: { text: { maxCharacters: 1200 } },
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Exa returned ${res.status} ${res.statusText}`);
+  }
+  const data = (await res.json()) as {
+    results?: Array<{ title?: string; url: string; text?: string }>;
+  };
+  const results = data.results ?? [];
+  if (!results.length) return "No results found.";
+  return results
+    .map(({ title, url, text }) => {
+      const snippet = text?.trim();
+      return `${title || url}\n${url}${snippet ? `\n${snippet}` : ""}`;
+    })
+    .join("\n\n");
+}
+
+/**
+ * Gemini's own grounding — `google.tools.googleSearch` — cannot ride alongside this app's
+ * function tools in one request: Gemini rejects "combination of function and provider-defined
+ * tools" outside the Gemini 3 family. Rather than withdraw search under Gemini entirely, this
+ * runs it in an ISOLATED sub-call that has only the provider-defined search tool and none of
+ * this app's other tools, so the restriction never applies. `webSearchTool` wraps this as a
+ * normal function tool, which is what lets it coexist with everything else in the outer turn.
+ *
+ * Falls back to this when `EXA_API_KEY` is unset; see `exaSearch` above for the preferred path.
+ */
+async function groundedSearch(searchQuery: string): Promise<string> {
+  const result = await generateText({
+    model: google(config.model()),
+    prompt:
+      "Search the web and answer the following question directly and concisely, using what " +
+      `you find. Question: ${searchQuery}`,
+    /**
+     * Cast for the same reason the old `webSearchTool` cast existed: `googleSearch`'s factory
+     * returns a `ProviderExecutedTool` whose generics `generateText`'s `tools:` cannot unify on
+     * their own. It really is a plain, opaque provider-run tool underneath.
+     */
+    tools: { google_search: google.tools.googleSearch({}) as Tool },
+  });
+
+  /**
+   * `result.sources` is `LanguageModelV4Source[]` (via `@ai-sdk/provider`), built by
+   * `@ai-sdk/google`'s `extractSources` from `groundingMetadata.groundingChunks` — verified
+   * against `node_modules/@ai-sdk/google/src/google-language-model.ts`. Only `sourceType:
+   * "url"` sources carry a `url` field (the other variant, `"document"`, does not), so that is
+   * the only kind appended here — bare URLs, one per line, for the outer model to cite.
+   */
+  const urls = result.sources
+    .filter((source) => source.sourceType === "url")
+    .map((source) => source.url);
+
+  return urls.length ? `${result.text}\n\nSources:\n${urls.join("\n")}` : result.text;
+}
+
+/**
+ * `web_search`, as a normal function tool on both providers — never the provider-defined
+ * `googleSearch` tool directly, which is what let it collide with the rest of this app's tools
+ * under Gemini in the first place (see `groundedSearch` above). OpenAI's hosted web-search tool
+ * has no such restriction and is passed straight through unchanged.
  */
 export function webSearchTool(): Tool {
-  /**
-   * Both factories return a `ProviderExecutedTool`, but with different (and mutually
-   * incompatible) generic parameters — Google's takes an options object, OpenAI's takes none —
-   * so TypeScript cannot unify the ternary's two branches into one assignable type on its own.
-   * The cast is exactly that unification: both sides really are opaque, provider-run tools, and
-   * `toolsFor`'s callers only ever pass this straight into `tools:`, never read its shape.
-   */
-  return (
-    isGoogle()
-      ? google.tools.googleSearch({})
-      : openai.tools.webSearch({ searchContextSize: "medium" })
-  ) as Tool;
+  if (isGoogle()) {
+    return tool({
+      description:
+        "Search the web for anything current, factual, or specific enough that being wrong " +
+        "would matter. Returns a written answer with source URLs to cite.",
+      inputSchema: z.object({
+        query: z.string().describe("What to search for."),
+      }),
+      execute: async ({ query }) => {
+        try {
+          return config.exaApiKey() ? await exaSearch(query) : await groundedSearch(query);
+        } catch (err) {
+          const why = err instanceof Error ? err.message : String(err);
+          console.error("[web_search] failed:", why);
+          return `Search failed: ${why}`;
+        }
+      },
+    }) as Tool;
+  }
+  return openai.tools.webSearch({ searchContextSize: "medium" }) as Tool;
 }
 
 /**
