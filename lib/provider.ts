@@ -81,6 +81,9 @@ async function exaSearch(searchQuery: string): Promise<string> {
       type: "auto",
       contents: { text: { maxCharacters: 1200 } },
     }),
+    // A stalled search must not hang the whole turn: an abort here throws, which
+    // `webSearchTool`'s try/catch turns into a returned "Search failed" string.
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     throw new Error(`Exa returned ${res.status} ${res.statusText}`);
@@ -111,6 +114,8 @@ async function exaSearch(searchQuery: string): Promise<string> {
 async function groundedSearch(searchQuery: string): Promise<string> {
   const result = await generateText({
     model: google(config.model()),
+    // Same reason as exaSearch: a stalled grounding sub-call must abort rather than hang the turn.
+    abortSignal: AbortSignal.timeout(20_000),
     prompt:
       "Search the web and answer the following question directly and concisely, using what " +
       `you find. Question: ${searchQuery}`,
