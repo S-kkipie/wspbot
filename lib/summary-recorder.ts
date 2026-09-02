@@ -1,8 +1,8 @@
 import "server-only";
 import { generateObject } from "ai";
-import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { config } from "./config";
+import { chatModel } from "./provider";
 import { wapi } from "./wapi";
 import { fetchDecrypted } from "./inbound-media";
 import * as summaries from "./summaries";
@@ -33,7 +33,7 @@ const describeImage = async (
 ): Promise<string | null> => {
   try {
     const result = await generateObject({
-      model: openai(config.visionModel()),
+      model: chatModel(config.visionModel()),
       schema: z.object({
         description: z
           .string()

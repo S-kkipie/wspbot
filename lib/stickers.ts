@@ -4,6 +4,7 @@ import { generateObject, generateImage } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { config } from "./config";
+import { chatModel } from "./provider";
 import { query } from "./db";
 import { wapi } from "./wapi";
 // Aliased: `toSticker` here already means "database row -> Sticker".
@@ -197,7 +198,7 @@ const describe = async (
 ): Promise<{ label: string; description: string | null }> => {
   try {
     const result = await generateObject({
-      model: openai(config.visionModel()),
+      model: chatModel(config.visionModel()),
       schema: z.object({
         label: z
           .string()
@@ -354,6 +355,20 @@ export const createFromPrompt = async (
   prompt: string,
   label?: string,
 ): Promise<Sticker> => {
+  /**
+   * Drawing needs an image model with a transparent-background option, which right now only
+   * `gpt-image-*` offers cleanly — Gemini's image models are a different shape and are phase 2
+   * (see `lib/provider.ts`). `reply()` already withdraws the `draw_sticker` tool under Gemini by
+   * deleting "stickers_draw" from the feature set before this can be reached; this guard is
+   * defense in depth for any other caller, and it throws rather than silently drawing nothing —
+   * `draw_sticker`'s `execute` already catches and reports it to the model as a normal tool
+   * failure, so this never crashes the webhook handler.
+   */
+  if (config.aiProvider() === "google") {
+    throw new Error(
+      "drawing new stickers is not available on this deployment yet (Gemini image generation is phase 2)",
+    );
+  }
   const result = await generateImage({
     model: openai.image(config.imageModel()),
     prompt: `${prompt.trim()}\n\n${STICKER_STYLE}`,

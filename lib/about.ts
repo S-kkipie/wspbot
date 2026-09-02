@@ -31,7 +31,9 @@ export const about = (on: Set<string>): string => {
     "How you are put together:",
     "- You are a Next.js app (App Router, React, TypeScript) running as a Docker container on a Dokploy-managed VPS, behind Traefik with a Let's Encrypt certificate, at wspbot.crafter.run.",
     "- WhatsApp reaches you through wapi, a self-hosted WhatsApp REST API that runs on the same VPS. It has no endpoint for listing received messages, so nothing polls: every message arrives as a signed webhook POST, which is acknowledged immediately and processed afterwards.",
-    `- Your thinking is OpenAI's ${config.model()}, called through the Vercel AI SDK.${has("web_search") ? " Web search runs on OpenAI's side rather than here." : ""}`,
+    config.aiProvider() === "google"
+      ? `- Your thinking is Google's ${config.model()}, called through the Vercel AI SDK.${has("web_search") ? " Web search runs as Gemini's own grounding, not something implemented here." : ""}`
+      : `- Your thinking is OpenAI's ${config.model()}, called through the Vercel AI SDK.${has("web_search") ? " Web search runs on OpenAI's side rather than here." : ""}`,
     ...(has("voice")
       ? [
           "- Speech is gpt-4o-mini-tts, re-encoded by ffmpeg to Ogg/Opus mono 48kHz, because that is what a WhatsApp voice note actually is — mp3 plays in WhatsApp Web and not on a phone.",

@@ -12,6 +12,7 @@ import {
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { config } from "./config";
+import { chatModel, reasoningProviderOptions, webSearchTool } from "./provider";
 import { query } from "./db";
 import { wapi, type MessageKey } from "./wapi";
 import * as memory from "./memory";
@@ -359,8 +360,8 @@ const httpUrl = z
  * a redundant "here you go".
  */
 const toolsFor = (turn: Turn, sent: string[]) => ({
-  // Provider-executed: OpenAI runs the search itself, so there is nothing to implement here.
-  web_search: openai.tools.webSearch({ searchContextSize: "medium" }),
+  // Provider-executed: the model's own side runs the search, so there is nothing to implement here.
+  web_search: webSearchTool(),
 
   send_media: tool({
     description:
@@ -460,6 +461,16 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
         .describe("How to deliver it, e.g. 'warm and unhurried'."),
     }),
     execute: async ({ text, voice, instructions }) => {
+      /**
+       * Defense in depth: `reply()` already withdraws this tool under Gemini by deleting
+       * "voice" from `on` before `features.withdraw` runs, so the model should never be able to
+       * call it. This guard is what keeps that true even if some future caller reaches
+       * `execute` a different way — degrading gracefully rather than throwing into a webhook
+       * handler that must never fail a whole turn over one tool.
+       */
+      if (config.aiProvider() === "google") {
+        return "Voice notes are not available on this deployment yet.";
+      }
       try {
         const speech = await generateSpeech({
           model: openai.speech(SPEECH_MODEL),
@@ -1247,24 +1258,30 @@ export const reply = async (turn: Turn): Promise<Reply> => {
    * the turn would then describe a tool it was not given.
    */
   const on = await features.enabled();
+  /**
+   * Image sticker generation and TTS voice have no clean Gemini equivalent yet (see
+   * `lib/provider.ts` and the phase-2 note in `lib/stickers.ts`/this file's `send_voice_note`).
+   * Masking them out of `on` here — before anything else reads it — withdraws both tools (via
+   * `features.withdraw` below) and the prompt sections that describe them (`systemPrompt` and
+   * `about()` read this same set), so the model never offers what it cannot deliver under
+   * Gemini. The database switch is left alone; this only overrides what it means at runtime.
+   */
+  if (config.aiProvider() === "google") {
+    on.delete("voice");
+    on.delete("stickers_draw");
+  }
   const content = await buildUserContent(turn, on);
   const history = await loadHistory(turn.chat);
   const sent: string[] = [];
 
   const result = await generateText({
-    model: openai(config.model()),
+    model: chatModel(config.model()),
     system: await systemPrompt(turn, on),
     messages: [...history, { role: "user", content }],
     tools: features.withdraw(toolsFor(turn, sent), on),
     // Without this the run stops after the first tool call and never says anything.
     stopWhen: stepCountIs(MAX_STEPS),
-    providerOptions: {
-      openai: {
-        reasoningEffort: config.effort(),
-        // A WhatsApp reply that needs scrolling has already failed.
-        textVerbosity: "low",
-      },
-    },
+    providerOptions: reasoningProviderOptions(config.effort()),
   });
 
   await usage.record({
