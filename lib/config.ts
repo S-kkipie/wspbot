@@ -96,10 +96,25 @@ export const config = {
     return clientId && clientSecret ? { clientId, clientSecret } : null;
   },
 
-  /** Any model your account can reach on the OpenAI Responses API. */
-  model: () => optional("BOT_MODEL") ?? "gpt-5.6",
+  /**
+   * Which provider `lib/provider.ts` calls: "google" (Gemini, the default) or "openai". Every
+   * model call in the app goes through `chatModel`/`reasoningProviderOptions`/`webSearchTool`
+   * rather than reading this directly, so switching providers touches config and provider.ts and
+   * nothing else.
+   */
+  aiProvider: () => optional("AI_PROVIDER") ?? "google",
 
-  /** Image model for drawing stickers. gpt-image-* supports transparent backgrounds. */
+  /** Gemini's key. Required only while `aiProvider()` is "google", which is the default. */
+  geminiApiKey: () => optional("GEMINI_API_KEY"),
+
+  /** Any model your account can reach on the selected provider. */
+  model: () => optional("BOT_MODEL") ?? "gemini-2.5-flash",
+
+  /**
+   * Image model for drawing stickers. OpenAI-only for now — gpt-image-* is the one family that
+   * supports a transparent background, and Gemini's image models are a different shape (see
+   * `lib/stickers.ts` `createFromPrompt`). Unused while `aiProvider()` is "google".
+   */
   imageModel: () => optional("BOT_IMAGE_MODEL") ?? "gpt-image-1",
 
   /**
@@ -107,14 +122,14 @@ export const config = {
    * pointing at something cheaper than the conversational model. Falls back to that model when
    * unset, which is the safe default rather than the cheap one.
    */
-  visionModel: () => optional("BOT_VISION_MODEL") ?? optional("BOT_MODEL") ?? "gpt-5.6",
+  visionModel: () => optional("BOT_VISION_MODEL") ?? optional("BOT_MODEL") ?? "gemini-2.5-flash",
 
   /**
    * The model that writes a scheduled summary. A digest is read by people who were not there,
    * so it is the one job here worth the top tier: it is infrequent, it runs on a long transcript,
    * and a summary that drops the decision everyone needed is worse than no summary.
    */
-  summaryModel: () => optional("BOT_SUMMARY_MODEL") ?? "gpt-5.6-sol",
+  summaryModel: () => optional("BOT_SUMMARY_MODEL") ?? "gemini-2.5-flash",
 
   /** Reasoning depth. Low keeps a chat bot snappy; raise it if answers feel shallow. */
   effort: () => optional("BOT_EFFORT") ?? "low",

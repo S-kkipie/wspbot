@@ -2,7 +2,7 @@
   "name": "wspbot",
   "version": "0.1.0",
   "private": true,
-  "description": "A WhatsApp bot that answers when tagged \u2014 searches the web and remembers what you tell it.",
+  "description": "A WhatsApp bot that answers when tagged — searches the web and remembers what you tell it.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -23,6 +23,7 @@
     "video-check": "tsx --conditions=react-server scripts/video-check.mts"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.46",
     "@ai-sdk/openai": "^4.0.46",
     "ai": "^7.0.77",
     "bcryptjs": "^3.0.3",
