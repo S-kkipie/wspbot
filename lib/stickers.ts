@@ -1,14 +1,13 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { generateObject, generateImage } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { generateObject } from "ai";
 import { z } from "zod";
 import { config } from "./config";
-import { chatModel } from "./provider";
+import { chatModel, drawImage } from "./provider";
 import { query } from "./db";
 import { wapi } from "./wapi";
 // Aliased: `toSticker` here already means "database row -> Sticker".
-import { toSticker as encodeSticker, firstFrame, StickerError } from "./sticker-maker";
+import { toSticker as encodeSticker, firstFrame, dropChromaKey, StickerError } from "./sticker-maker";
 import type { Media } from "./mentions";
 import { fetchMedia, looksAnimated } from "./fetch-media";
 import { fetchDecrypted } from "./inbound-media";
@@ -330,24 +329,17 @@ export const createFromUrl = async (
 };
 
 /**
- * Steers the image model towards something that reads as a sticker rather than a picture.
- *
- * The transparent background is the load-bearing part: without it every sticker arrives as a
- * square photo with a white card behind it, which looks broken next to real ones. Drop shadows
- * and borders are ruled out for the same reason — they turn into visible rectangles once the
- * background is gone.
- */
-const STICKER_STYLE =
-  "Sticker art: one clear subject, centred, bold clean outlines, simple flat shapes and vivid " +
-  "colours. Fully transparent background. No drop shadow, no border, no frame, no background " +
-  "scenery, and no text unless the request asks for words.";
-
-/**
  * Draw a sticker from a description.
  *
  * The counterpart to `createFromUrl`: this invents the picture rather than finding one. Better
  * for something that does not exist, worse for a specific meme or a real person, and the prompt
  * steers the model between the two.
+ *
+ * The style prompt and the transparent-background trick both live in `lib/provider.ts`
+ * `drawImage`, because they differ by provider — OpenAI gets a real `background: "transparent"`
+ * option, Gemini does not and gets a chroma-key backdrop instead. This function stays provider-
+ * agnostic: it gets a description in, and treats whatever comes back as "cut the backdrop if
+ * asked, then it's a normal image" either way.
  */
 export const createFromPrompt = async (
   chat: string,
@@ -355,50 +347,24 @@ export const createFromPrompt = async (
   prompt: string,
   label?: string,
 ): Promise<Sticker> => {
-  /**
-   * Drawing needs an image model with a transparent-background option, which right now only
-   * `gpt-image-*` offers cleanly — Gemini's image models are a different shape and are phase 2
-   * (see `lib/provider.ts`). `reply()` already withdraws the `draw_sticker` tool under Gemini by
-   * deleting "stickers_draw" from the feature set before this can be reached; this guard is
-   * defense in depth for any other caller, and it throws rather than silently drawing nothing —
-   * `draw_sticker`'s `execute` already catches and reports it to the model as a normal tool
-   * failure, so this never crashes the webhook handler.
-   */
-  if (config.aiProvider() === "google") {
-    throw new Error(
-      "drawing new stickers is not available on this deployment yet (Gemini image generation is phase 2)",
-    );
-  }
-  const result = await generateImage({
-    model: openai.image(config.imageModel()),
-    prompt: `${prompt.trim()}\n\n${STICKER_STYLE}`,
-    // Square in, square out — ffmpeg only has to scale, never pad.
-    size: "1024x1024",
-    providerOptions: {
-      openai: {
-        background: "transparent",
-        // png keeps the alpha channel intact on the way into ffmpeg.
-        outputFormat: "png",
-        quality: "medium",
-      },
-    },
-  });
+  const trimmedPrompt = prompt.trim();
+  const drawn = await drawImage(trimmedPrompt);
 
   await usage.record({
     kind: "image",
-    model: config.imageModel(),
+    model: drawn.model,
     chat,
-    usage: result.usage,
+    usage: drawn.usage,
   });
 
-  const png = Buffer.from(result.image.uint8Array);
+  const png = drawn.chromaKey ? await dropChromaKey(drawn.png, drawn.chromaKey) : drawn.png;
   const webp = await encodeSticker(png, false);
 
   /**
    * No vision call: what it depicts is exactly what was asked for, so the prompt itself is the
    * description, and a better one than a model looking at the result would write.
    */
-  return store(chat, senderName, webp, webp, label ?? prompt.trim().slice(0, 40), prompt.trim());
+  return store(chat, senderName, webp, webp, label ?? trimmedPrompt.slice(0, 40), trimmedPrompt);
 };
 
 /**

@@ -1,6 +1,7 @@
 import "server-only";
 import { config } from "./config";
 import { claims } from "./features";
+import { speechModelName } from "./provider";
 
 /**
  * What the bot knows about itself.
@@ -36,7 +37,7 @@ export const about = (on: Set<string>): string => {
       : `- Your thinking is OpenAI's ${config.model()}, called through the Vercel AI SDK.${has("web_search") ? " Web search runs on OpenAI's side rather than here." : ""}`,
     ...(has("voice")
       ? [
-          "- Speech is gpt-4o-mini-tts, re-encoded by ffmpeg to Ogg/Opus mono 48kHz, because that is what a WhatsApp voice note actually is — mp3 plays in WhatsApp Web and not on a phone.",
+          `- Speech is ${speechModelName()}, re-encoded by ffmpeg to Ogg/Opus mono 48kHz, because that is what a WhatsApp voice note actually is — mp3 plays in WhatsApp Web and not on a phone.`,
         ]
       : []),
     ...(has("stickers_collect") || has("stickers_make") || has("stickers_draw")

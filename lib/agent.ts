@@ -1,7 +1,6 @@
 import "server-only";
 import {
   generateText,
-  generateSpeech,
   stepCountIs,
   tool,
   type ModelMessage,
@@ -9,10 +8,9 @@ import {
   type TextPart,
   type FilePart,
 } from "ai";
-import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { config } from "./config";
-import { chatModel, reasoningProviderOptions, webSearchTool } from "./provider";
+import { chatModel, reasoningProviderOptions, webSearchTool, speak } from "./provider";
 import { query } from "./db";
 import { wapi, type MessageKey } from "./wapi";
 import * as memory from "./memory";
@@ -52,15 +50,6 @@ const MAX_STEPS = 10;
 
 /** Turns of conversation replayed per chat. Enough for follow-ups without a runaway prompt. */
 const HISTORY_TURNS = 20;
-
-/** OpenAI's current small TTS model; overridable for the same reason as the chat model. */
-const SPEECH_MODEL = "gpt-4o-mini-tts";
-
-/**
- * Lossless out of the TTS model: it is re-encoded to Opus immediately afterwards, and
- * mp3-then-Opus would stack two lossy passes for nothing.
- */
-const SPEECH_FORMAT = "wav";
 
 export type Turn = {
   chat: string;
@@ -461,38 +450,24 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
         .describe("How to deliver it, e.g. 'warm and unhurried'."),
     }),
     execute: async ({ text, voice, instructions }) => {
-      /**
-       * Defense in depth: `reply()` already withdraws this tool under Gemini by deleting
-       * "voice" from `on` before `features.withdraw` runs, so the model should never be able to
-       * call it. This guard is what keeps that true even if some future caller reaches
-       * `execute` a different way — degrading gracefully rather than throwing into a webhook
-       * handler that must never fail a whole turn over one tool.
-       */
-      if (config.aiProvider() === "google") {
-        return "Voice notes are not available on this deployment yet.";
-      }
       try {
-        const speech = await generateSpeech({
-          model: openai.speech(SPEECH_MODEL),
-          text,
-          voice: voice ?? "alloy",
-          outputFormat: SPEECH_FORMAT,
-          ...(instructions ? { instructions } : {}),
-        });
+        const speech = await speak(text, { voice, instructions });
 
         /**
          * Re-encoded to Ogg/Opus, which is what a WhatsApp voice note actually is. mp3 looks
          * fine in WhatsApp Web — a browser will decode anything the OS can — while the mobile
-         * app refuses to play it. So this is a correctness step, not an optimisation.
+         * app refuses to play it. So this is a correctness step, not an optimisation. Gemini's
+         * TTS hands back WAV-wrapped PCM rather than mp3, but the same re-encode runs either
+         * way: `toVoiceNote` only knows "make this Ogg/Opus," not which provider produced it.
          */
         await usage.record({
           kind: "speech",
-          model: SPEECH_MODEL,
+          model: speech.model,
           chat: turn.chat,
           characters: text.length,
         });
 
-        const opus = await toVoiceNote(Buffer.from(speech.audio.uint8Array));
+        const opus = await toVoiceNote(speech.audio);
 
         // wapi fetches media by URL at send time, so the bytes need a home first.
         const url = await wapi.upload({
@@ -1259,20 +1234,17 @@ export const reply = async (turn: Turn): Promise<Reply> => {
    */
   const on = await features.enabled();
   /**
-   * Image sticker generation and TTS voice have no clean Gemini equivalent yet (see
-   * `lib/provider.ts` and the phase-2 note in `lib/stickers.ts`/this file's `send_voice_note`).
-   * Masking them out of `on` here — before anything else reads it — withdraws both tools (via
-   * `features.withdraw` below) and the prompt sections that describe them (`systemPrompt` and
-   * `about()` read this same set), so the model never offers what it cannot deliver under
-   * Gemini. The database switch is left alone; this only overrides what it means at runtime.
+   * Voice and drawn stickers both now have a Gemini path (see `lib/provider.ts` `speak` and
+   * `drawImage`), so only `web_search` still needs masking out here. Gemini rejects "combination
+   * of function and provider-defined tools": the model's own function tools (memory, media,
+   * polls…) cannot ride alongside the provider-defined `googleSearch` grounding tool in one
+   * request. The function tools are the point, so the grounding tool is the one that goes.
+   * Deleting "web_search" from `on` before anything else reads it withdraws both the tool (via
+   * `features.withdraw` below) and the prompt section that describes it — `systemPrompt` and
+   * `about()` read this same set, so the model never offers what it cannot deliver under Gemini.
+   * The database switch is left alone; this only overrides what it means at runtime.
    */
   if (config.aiProvider() === "google") {
-    on.delete("voice");
-    on.delete("stickers_draw");
-    // Gemini rejects "combination of function and provider-defined tools": the model's own
-    // function tools (memory, media, polls…) cannot ride alongside the provider-defined
-    // `googleSearch` grounding tool in one request. The function tools are the point, so the
-    // grounding tool is the one that goes. Withdraws `web_search` and its prompt section too.
     on.delete("web_search");
   }
   const content = await buildUserContent(turn, on);

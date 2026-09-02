@@ -111,11 +111,16 @@ export const config = {
   model: () => optional("BOT_MODEL") ?? "gemini-2.5-flash",
 
   /**
-   * Image model for drawing stickers. OpenAI-only for now — gpt-image-* is the one family that
-   * supports a transparent background, and Gemini's image models are a different shape (see
-   * `lib/stickers.ts` `createFromPrompt`). Unused while `aiProvider()` is "google".
+   * Image model for drawing stickers. Both providers are wired up (`lib/provider.ts` `drawImage`):
+   * the gpt-image-* family returns a real transparent background directly; Gemini's "Nano Banana"
+   * image models have no alpha-channel output at all, so `drawImage` asks for a flat chroma-key
+   * backdrop instead and `lib/stickers.ts` keys it out with ffmpeg. gemini-2.5-flash-image is the
+   * fast/cheap tier; point this at gemini-3-pro-image-preview for a cleaner cutout if the edges
+   * look rough.
    */
-  imageModel: () => optional("BOT_IMAGE_MODEL") ?? "gpt-image-1",
+  imageModel: () =>
+    optional("BOT_IMAGE_MODEL") ??
+    ((optional("AI_PROVIDER") ?? "google") === "google" ? "gemini-2.5-flash-image" : "gpt-image-1"),
 
   /**
    * Model for looking at a sticker and naming it. A narrow, bounded task, so it is worth

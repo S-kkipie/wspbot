@@ -133,3 +133,37 @@ export const firstFrame = async (source: Buffer): Promise<Buffer> =>
     ]);
     return readFile(output);
   });
+
+/**
+ * Strip a solid backdrop colour down to real alpha.
+ *
+ * Exists for `lib/provider.ts`'s Gemini image path. Gemini's image models have no alpha-channel
+ * output at all — ask for "transparent background" in plain English and it paints a literal
+ * checkerboard, because that is what transparency looks like in an image editor, not what it
+ * means. The documented workaround (and the one every third-party writeup of this lands on) is to
+ * render on a flat colour and cut it out afterwards, so `drawImage` asks Gemini for a solid
+ * magenta backdrop and hands the result here.
+ *
+ * `colorkey` measures each pixel's distance from `color` in RGB space and makes anything close
+ * enough transparent; `blend` feathers a thin band around that boundary so an anti-aliased edge
+ * does not leave a hard magenta ring. This file stays provider-agnostic on purpose — it only
+ * knows "flat colour in, alpha out," never which model painted it — the same reason `FIT` above
+ * does the opposite (transparent in, padded out) without knowing who is asking.
+ *
+ * This is a real cutout, not a disguised version of the white-card bug: the ceiling on how clean
+ * it looks is how flat the model actually paints the backdrop, which varies by prompt and cannot
+ * be verified without a live key — `npm run draw-check` is where that gets judged by eye.
+ */
+export const dropChromaKey = async (source: Buffer, color: string): Promise<Buffer> =>
+  inScratch(async (dir) => {
+    const input = join(dir, "input.png");
+    const output = join(dir, "keyed.png");
+    await writeFile(input, source);
+    await ffmpeg([
+      "-y", "-hide_banner", "-loglevel", "error",
+      "-i", input,
+      "-vf", `format=rgba,colorkey=${color}:0.22:0.08`,
+      output,
+    ]);
+    return readFile(output);
+  });
