@@ -1269,6 +1269,11 @@ export const reply = async (turn: Turn): Promise<Reply> => {
   if (config.aiProvider() === "google") {
     on.delete("voice");
     on.delete("stickers_draw");
+    // Gemini rejects "combination of function and provider-defined tools": the model's own
+    // function tools (memory, media, polls…) cannot ride alongside the provider-defined
+    // `googleSearch` grounding tool in one request. The function tools are the point, so the
+    // grounding tool is the one that goes. Withdraws `web_search` and its prompt section too.
+    on.delete("web_search");
   }
   const content = await buildUserContent(turn, on);
   const history = await loadHistory(turn.chat);
