@@ -27,7 +27,7 @@ export type Feature = {
   /** Tool names withdrawn when this is off. Some features are prompt- or handler-only. */
   tools: string[];
   /** Also needs deployment configuration; the dashboard says so rather than lying about it. */
-  needs?: "notion" | "sheets";
+  needs?: "notion" | "sheets" | "leaderboard";
 };
 
 /**
@@ -193,6 +193,73 @@ export const FEATURES: Feature[] = [
     detail:
       "Reads one group and posts a digest into another on a cron — decisions, open questions, links and pictures. The source group is recorded in full while this is on, including messages that do not tag the bot; nothing else is, and it is kept for a fortnight.",
     tools: [],
+  },
+  {
+    key: "supporters",
+    title: "Knows who chipped in",
+    detail:
+      "Somebody asks who supports this bot and it reads out the list — names and how they helped, never amounts. The list is kept on the dashboard.",
+    claim: "say who has chipped in towards running you",
+    tools: ["list_supporters"],
+  },
+  {
+    key: "render",
+    title: "Draws its own HTML",
+    detail:
+      "Anything it can lay out in HTML — a table, a card, a summary with real formatting — it can render and send as a picture, since WhatsApp shows none of that as text. Rendered with no network access at all, so nothing the page references can be fetched.",
+    claim: "render a table or a card as a picture",
+    tools: ["render_html"],
+  },
+  {
+    key: "github",
+    title: "Works with GitHub",
+    detail:
+      "Looks up repositories and issues, and — where it has been given permission — opens issues, comments on them, creates repositories and publishes them as websites with GitHub Pages, as the bot's own GitHub account. Reading is open; every write needs its own switch, only lands on repositories named on the dashboard, and is recorded with who asked for it. It can also be limited to particular groups.",
+    claim: "look things up on GitHub, and open issues where it is allowed to",
+    tools: [
+      "github_repo",
+      "github_issues",
+      "github_my_repos",
+      "github_open_issue",
+      "github_comment",
+      "github_create_repo",
+      "github_set_visibility",
+      "github_pages",
+      "github_put_files",
+      "github_publish_stickers",
+    ],
+  },
+  {
+    key: "chime",
+    title: "Chimes in on its own",
+    detail:
+      "In groups set up for it, it reads along and occasionally says something without being tagged — the way somebody in the room would. Enabling a group records it, the same as a summary schedule does. How often, how much has to have been said first, quiet hours and a daily cap are all set per group.",
+    tools: [],
+  },
+  {
+    key: "screenshot",
+    title: "Takes a picture of a web page",
+    detail:
+      "Give it a link and it opens the page in a real browser and sends back a screenshot — the top of it, or the whole thing. It never opens an address inside the private network, and it carries none of the bot's own logins.",
+    claim: "screenshot a web page you link",
+    tools: ["screenshot_page"],
+  },
+  {
+    key: "leaderboard",
+    title: "Follows a vote leaderboard",
+    detail:
+      "Knows where one project stands in a public vote count and what it would take to move up a place \u2014 the exact gap, not an estimate. Anyone in the chat can ask; a group can also be set up on the dashboard to be told when the standing changes.",
+    claim: "say where we stand on the vote leaderboard, and what the next place costs",
+    tools: ["leaderboard"],
+    needs: "leaderboard",
+  },
+  {
+    key: "roadmap",
+    title: "Takes votes on what to build next",
+    detail:
+      "Anyone can ask what is being built; supporters can back items and suggest new ones. A vote is weighted by how much somebody has chipped in, capped so nobody can own the list, and a suggestion waits for approval before it becomes votable. Voting ranks things — it never switches a feature on.",
+    claim: "say what is on the roadmap, and take votes on it from supporters",
+    tools: ["list_roadmap", "vote_roadmap", "propose_roadmap"],
   },
   {
     key: "usage_report",

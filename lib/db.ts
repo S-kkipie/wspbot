@@ -247,9 +247,257 @@ const migrate = async (): Promise<void> => {
       created_at  timestamptz not null default now()
     );
     create index if not exists logged_messages_chat_at_idx on logged_messages (chat, at);
+
+    /*
+     * Chiming in: which groups the bot may speak in without being tagged, and how restrained it
+     * has to be about it. Enabling a chat here records it exactly as a summary schedule does —
+     * the two read the same logged_messages — so the recording gate has to consult both.
+     *
+     * last_chime_at is the claim, moved when a run starts rather than when it finishes: a row
+     * left due while it is being worked on fires twice the moment a run outlasts the tick.
+     * chimed_to is the watermark, moved only once something has actually been considered.
+     */
+    create table if not exists chime_settings (
+      chat          text primary key,
+      chat_name     text,
+      enabled       boolean     not null default true,
+      -- The floor on how often it may speak, and how much has to have been said first.
+      every_minutes integer     not null default 90,
+      min_messages  integer     not null default 8,
+      -- Local hours in BOT_TIMEZONE, "from" inclusive and "to" exclusive; equal means never.
+      quiet_from    integer     not null default 23,
+      quiet_to      integer     not null default 8,
+      max_per_day   integer     not null default 4,
+      -- A steer for this group in particular, read into the turn that writes the message.
+      note          text,
+      chimed_to     timestamptz,
+      last_chime_at timestamptz,
+      last_error    text,
+      created_at    timestamptz not null default now()
+    );
+
+    /*
+     * What it said unprompted, and on which local day. The day is stored rather than derived,
+     * because the cap is "four times today" as a person in Lima reads it, and deriving that from
+     * a timestamp in SQL means putting a timezone into every query that counts.
+     */
+    create table if not exists chimes (
+      id   bigserial primary key,
+      chat text        not null,
+      day  text        not null,
+      text text        not null default '',
+      at   timestamptz not null default now()
+    );
+    create index if not exists chimes_chat_day_idx on chimes (chat, day);
+
+    /*
+     * GitHub, as one account this deployment acts as. One row, always id 1: two rows would mean
+     * every call site had to answer "which account?" for no gain.
+     *
+     * The token is sealed with AES-256-GCM keyed off AUTH_SECRET (lib/secret-box.ts) rather than
+     * stored as text. It is the one credential here that can create repositories on an account,
+     * and it is never read back by a person — the dashboard shows four characters — so there is
+     * no cost to it being unreadable in a dump of this table.
+     */
+    create table if not exists github_settings (
+      id                 integer primary key default 1 check (id = 1),
+      token              text,
+      login              text,
+      scopes             text,
+      hint               text,
+      owner              text,
+      -- Reads need none of these. Every write is off until somebody turns it on deliberately.
+      can_open_issues    boolean     not null default false,
+      can_comment        boolean     not null default false,
+      can_create_repos   boolean     not null default false,
+      repos_private      boolean     not null default true,
+      max_writes_per_day integer     not null default 10,
+      connected_at       timestamptz
+    );
+
+    /*
+     * Which repositories may be written to. Empty means none, which is the right state for a
+     * token that has just been added: anyone in a group can ask the bot to open an issue, so the
+     * list is what decides where that can land. Reads are not gated on it.
+     */
+    create table if not exists github_repos (
+      repo     text primary key,
+      added_at timestamptz not null default now()
+    );
+
+    /*
+     * Everything written to GitHub, kept. It is the daily cap's counter and the answer to "who
+     * asked for this issue?", which is the first question anybody would have.
+     */
+    create table if not exists github_actions (
+      id     bigserial primary key,
+      at     timestamptz not null default now(),
+      chat   text,
+      who    text,
+      action text        not null,
+      target text,
+      detail text
+    );
+    create index if not exists github_actions_at_idx on github_actions (at desc);
+
+    /*
+     * Which chats GitHub is reachable from. 'everywhere' is the default so that turning the
+     * feature on does not silently do nothing; 'listed' means these rows and nothing else.
+     *
+     * Added by ALTER rather than in the create above, because the table already exists in a
+     * deployment that predates this column, and "create table if not exists" would leave it
+     * without one — a NOT NULL read against a missing column throws on every dashboard page.
+     */
+    alter table github_settings add column if not exists chat_mode text not null default 'everywhere';
+    -- Publishing a site is a write like the others, and off until somebody says otherwise.
+    alter table github_settings add column if not exists can_deploy_pages boolean not null default false;
+    -- Committing files is its own permission: it is the one that can change what a site says.
+    alter table github_settings add column if not exists can_push_files boolean not null default false;
+
+    create table if not exists github_chats (
+      chat      text primary key,
+      chat_name text,
+      added_at  timestamptz not null default now()
+    );
     -- Deliveries retry, and the same message must not appear twice in a digest.
     create unique index if not exists logged_messages_unique
       on logged_messages (chat, message_id);
+
+    /*
+     * Who has chipped in. Yape leaves no trace this app can reach, so those are entered by hand;
+     * Buy Me a Coffee has an API, so those carry the external id they came with.
+     *
+     * The handle column is a normalised WhatsApp identity and is optional: somebody can support
+     * without the bot ever needing to know which chat participant they are.
+     */
+    create table if not exists supporters (
+      id          serial primary key,
+      name        text        not null,
+      handle      text,
+      -- yape | coffee | code | other
+      via         text        not null default 'other',
+      note        text,
+      external_id text,
+      since       timestamptz not null default now(),
+      created_at  timestamptz not null default now()
+    );
+    -- Partial, so hand-entered rows (which have no external id) never collide with each other.
+    create unique index if not exists supporters_external_key
+      on supporters (via, external_id) where external_id is not null;
+    -- The single supporters.handle is superseded by supporter_handles below; its index goes with
+    -- it. Dropping by name rather than leaving the create in place, which would fail on every run
+    -- once the column is gone.
+    drop index if exists supporters_handle_idx;
+
+    -- How much someone has chipped in, as a count rather than money. Buy Me a Coffee supplies it;
+    -- a Yape gift is converted by hand. This is the voting weight, before the cap.
+    alter table supporters add column if not exists coffees integer not null default 1;
+
+    /*
+     * One person, several identities.
+     *
+     * WhatsApp gives the same human a phone JID, a LID and now a username, and none is derivable
+     * from the others -- wapi maps a phone to a LID and back, and nothing resolves a username at
+     * all. So somebody who is 188025162178706 in a group and _cris.fast to his friends needs both
+     * recorded, or whichever one you did not type simply never matches and nothing says why.
+     *
+     * This table is the truth for matching. The old single supporters.handle is folded in below
+     * and then dropped, guarded so it happens exactly once.
+     */
+    create table if not exists supporter_handles (
+      -- Unique across everybody: two supporters cannot claim the same identity.
+      handle       text primary key,
+      supporter_id integer     not null references supporters (id) on delete cascade,
+      created_at   timestamptz not null default now()
+    );
+    create index if not exists supporter_handles_supporter_idx
+      on supporter_handles (supporter_id);
+
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.columns
+         where table_name = 'supporters' and column_name = 'handle'
+      ) then
+        insert into supporter_handles (handle, supporter_id)
+        select handle, id from supporters where handle is not null and handle <> ''
+        on conflict (handle) do nothing;
+
+        alter table supporters drop column handle;
+      end if;
+    end $$;
+
+    /*
+     * The roadmap. Supporters rank what gets built next; an item only becomes votable once it has
+     * been approved, so proposing is open and the list stays curated.
+     */
+    create table if not exists roadmap_items (
+      id          serial primary key,
+      title       text        not null,
+      detail      text,
+      -- proposed | open | shipped | declined
+      state       text        not null default 'proposed',
+      -- Normalised handle of whoever suggested it; null when it was added from the dashboard.
+      proposed_by text,
+      created_at  timestamptz not null default now(),
+      settled_at  timestamptz
+    );
+    create index if not exists roadmap_items_state_idx on roadmap_items (state);
+
+    /*
+     * One vote per person per item, which the primary key enforces rather than any code. Without
+     * it, voting twice would double that person weight in the tally and nothing would say so.
+     *
+     * The weight is deliberately not stored here: it is looked up when the tally is computed, so
+     * buying another coffee strengthens every vote already held instead of needing a backfill.
+     */
+    create table if not exists roadmap_votes (
+      item_id      integer     not null references roadmap_items (id) on delete cascade,
+      supporter_id integer     not null references supporters (id) on delete cascade,
+      at           timestamptz not null default now(),
+      primary key (item_id, supporter_id)
+    );
+
+    /*
+     * Votes used to key on the handle somebody voted with. Once one person can hold several
+     * identities that is a second vote waiting to happen: back an item as your LID, back it again
+     * as your username, and the tally counts you twice. Keyed on the supporter it cannot.
+     *
+     * Rebuilt in place rather than recreated, so any vote already cast survives; guarded on the
+     * old column, so it runs on the deployment that first sees this and never again.
+     */
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.columns
+         where table_name = 'roadmap_votes' and column_name = 'handle'
+      ) then
+        alter table roadmap_votes add column if not exists supporter_id integer;
+
+        update roadmap_votes v
+           set supporter_id = h.supporter_id
+          from supporter_handles h
+         where h.handle = v.handle;
+
+        -- A vote whose handle belongs to nobody has no weight anyway.
+        delete from roadmap_votes where supporter_id is null;
+
+        -- Two identities of one person on the same item collapse to the earlier vote.
+        delete from roadmap_votes a
+              using roadmap_votes b
+              where a.item_id = b.item_id
+                and a.supporter_id = b.supporter_id
+                and a.ctid > b.ctid;
+
+        alter table roadmap_votes drop constraint if exists roadmap_votes_pkey;
+        alter table roadmap_votes drop column handle;
+        alter table roadmap_votes alter column supporter_id set not null;
+        alter table roadmap_votes add primary key (item_id, supporter_id);
+        alter table roadmap_votes
+          add constraint roadmap_votes_supporter_fkey
+          foreign key (supporter_id) references supporters (id) on delete cascade;
+      end if;
+    end $$;
 
     /*
      * Which abilities are switched off, set from the dashboard. Only deviations are stored:
@@ -261,6 +509,48 @@ const migrate = async (): Promise<void> => {
       key        text primary key,
       enabled    boolean     not null,
       updated_at timestamptz not null default now()
+    );
+
+    /*
+     * Groups told when a vote leaderboard moves.
+     *
+     * Keyed on the chat: two watches in one group would be two notifications about the same
+     * number, and the primary key is cheaper than finding that out from the group.
+     *
+     * last_position / last_votes / last_gap are the snapshot the *announcement* left behind, and
+     * "did it move?" is measured against them. They advance only on a message that actually
+     * went out — a standing that changed while the send was failing has to still read as changed
+     * on the next tick, or the one announcement anybody cared about is the one that is skipped.
+     *
+     * last_minute is the claim, written in the same statement that reads it, so two overlapping
+     * ticks or a second container cannot both announce the same minute.
+     */
+    create table if not exists leaderboard_watch (
+      chat            text primary key,
+      chat_name       text,
+      enabled         boolean     not null default true,
+      -- Five-field cron, evaluated in BOT_TIMEZONE. A ceiling on how often it may speak here.
+      cron            text        not null default '*/10 * * * *',
+      quiet_from      integer     not null default 23,
+      quiet_to        integer     not null default 8,
+      max_per_day     integer     not null default 6,
+      -- Off means every firing speaks, which is how a group learns to mute the bot.
+      on_change_only  boolean     not null default true,
+      -- Attach a screenshot of the board. Costs a Chromium run per message that goes out, which
+      -- the daily cap bounds; the figures never come from it.
+      with_picture    boolean     not null default true,
+      -- A vote ends. Without this the bot is still announcing a frozen board next month.
+      ends_at         timestamptz,
+      last_position   integer,
+      last_votes      integer,
+      last_gap        integer,
+      -- The daily cap, counted in a local day rather than a UTC one.
+      announced_day   text,
+      announced_count integer     not null default 0,
+      last_minute     text,
+      last_run_at     timestamptz,
+      last_error      text,
+      created_at      timestamptz not null default now()
     );
 
     create table if not exists notion_connections (

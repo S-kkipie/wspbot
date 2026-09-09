@@ -6,7 +6,14 @@ services:
       # Next binds to localhost without HOSTNAME, and Traefik then 404s.
       HOSTNAME: "0.0.0.0"
       PORT: "3000"
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # google | openai (default: google) — the single switch lib/provider.ts reads. See
+      # AI_PROVIDER in .env.example for what each of these gates.
+      AI_PROVIDER: ${AI_PROVIDER:-google}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Optional: backs web_search under Gemini via Exa. Unset, it falls back to an isolated
+      # Gemini grounding sub-call instead.
+      EXA_API_KEY: ${EXA_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       BOT_MODEL: ${BOT_MODEL}
       BOT_EFFORT: ${BOT_EFFORT}
       DATABASE_URL: ${DATABASE_URL}
@@ -22,6 +29,13 @@ services:
       # Reminders need it: "nine in the morning" is meaningless on a UTC server.
       BOT_TIMEZONE: ${BOT_TIMEZONE}
       BOT_SUMMARY_MODEL: ${BOT_SUMMARY_MODEL}
+      BOT_SUPPORTER_RATE_LIMIT: ${BOT_SUPPORTER_RATE_LIMIT}
+      BUYMEACOFFEE_TOKEN: ${BUYMEACOFFEE_TOKEN}
+      BUYMEACOFFEE_WEBHOOK_SECRET: ${BUYMEACOFFEE_WEBHOOK_SECRET}
+      # Left empty in production — the image installs Chromium at the path the renderer
+      # already looks in. The `:-` default is what keeps compose from warning about an
+      # unset variable on every deploy; it exists only so it *can* be overridden.
+      CHROMIUM_PATH: ${CHROMIUM_PATH:-}
       # The dashboard shows memories, stickers and spend, so it is behind a sign-in.
       ADMIN_USER: ${ADMIN_USER}
       ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
@@ -39,5 +53,13 @@ services:
       NOTION_CLIENT_SECRET: ${NOTION_CLIENT_SECRET}
       # Used to build the OAuth redirect, so it has to match the integration's registered URI.
       APP_URL: ${APP_URL}
+      # The public vote board the bot follows, and our project's slug on it. Optional: unset,
+      # the leaderboard tool is not offered and no group is told anything.
+      LEADERBOARD_URL: ${LEADERBOARD_URL:-}
+      LEADERBOARD_SLUG: ${LEADERBOARD_SLUG:-}
+      # Comma-separated group JIDs the bot may act in. Empty or unset blocks every group —
+      # see lib/allowlist.ts isAllowedChat(). Has no effect on DMs (BOT_REPLY_TO_DMS governs
+      # those on its own).
+      BOT_GROUP_ALLOWLIST: ${BOT_GROUP_ALLOWLIST:-}
     expose:
       - "3000"

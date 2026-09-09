@@ -104,6 +104,19 @@ export const config = {
    */
   aiProvider: () => optional("AI_PROVIDER") ?? "google",
 
+  /**
+   * The public vote leaderboard this bot follows, and which project on it is ours.
+   *
+   * Both or neither: a URL with no slug cannot answer "what position are we in", and a slug with
+   * no URL has nothing to read. Null means the feature is switched on but not set up here, which
+   * the dashboard says out loud rather than leaving as a tool that fails when someone asks.
+   */
+  leaderboard: (): { url: string; slug: string } | null => {
+    const url = optional("LEADERBOARD_URL");
+    const slug = optional("LEADERBOARD_SLUG");
+    return url && slug ? { url: url.replace(/\/$/, ""), slug } : null;
+  },
+
   /** Gemini's key. Required only while `aiProvider()` is "google", which is the default. */
   geminiApiKey: () => optional("GEMINI_API_KEY"),
 
@@ -143,6 +156,27 @@ export const config = {
    */
   summaryModel: () => optional("BOT_SUMMARY_MODEL") ?? "gemini-2.5-flash",
 
+  /**
+   * A Buy Me a Coffee personal access token, issued from developers.buymeacoffee.com. Optional:
+   * without it, coffee supporters are simply added by hand like the Yape ones, and the sync
+   * button says so rather than failing.
+   */
+  coffeeToken: () => optional("BUYMEACOFFEE_TOKEN"),
+
+  /**
+   * The signing secret of one Buy Me a Coffee webhook, from the same portal. Each webhook has
+   * its own, and removing and re-adding the webhook is how it is regenerated. Without it the
+   * receiver refuses everything rather than accepting unverified writes.
+   */
+  coffeeWebhookSecret: () => optional("BUYMEACOFFEE_WEBHOOK_SECRET"),
+
+  /**
+   * Where Chromium lives, for rendering HTML to a picture. Set only when it is somewhere other
+   * than Alpine's default — on a Mac, for instance, pointing at a local Chrome is what makes
+   * `npm run render-check` runnable outside Docker.
+   */
+  chromiumPath: () => optional("CHROMIUM_PATH"),
+
   /** Reasoning depth. Low keeps a chat bot snappy; raise it if answers feel shallow. */
   effort: () => optional("BOT_EFFORT") ?? "low",
 
@@ -172,6 +206,16 @@ export const config = {
   defaultRateLimit: () => {
     const value = Number(optional("BOT_RATE_LIMIT_PER_MINUTE"));
     return Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
+  },
+
+  /**
+   * What a supporter is allowed per minute. Applied by `lib/rate-limit.ts` to anyone on the
+   * supporters list with a tied handle, unless they have a row of their own. Never lowers
+   * anybody: if it is set below the default, the default wins.
+   */
+  supporterRateLimit: () => {
+    const value = Number(optional("BOT_SUPPORTER_RATE_LIMIT"));
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : 5;
   },
 
   /**

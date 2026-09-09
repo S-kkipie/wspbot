@@ -678,6 +678,13 @@ label.pick > span {
   overflow-wrap: anywhere;
 }
 
+/* A stack of checkbox rows inside a form grid, which is otherwise one control per row. */
+.checks {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.25rem;
+}
+
 .move-controls {
   display: grid;
   gap: 0.5rem;
@@ -726,4 +733,35 @@ fieldset.modes input[type="radio"] {
 .move-controls button[type="submit"] {
   justify-self: start;
   margin-top: 0.6rem;
+}
+
+/* ── supporters ──────────────────────────────────────────────────────── */
+
+/* Forged gold, like every other accent — it marks somebody, it does not decorate. */
+.star {
+  color: var(--accent);
+  font-size: 0.9em;
+  line-height: 1;
+  flex: none;
+}
+
+.who-name {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  overflow-wrap: anywhere;
+}
+
+ul.callers li .star {
+  margin-right: 0.35rem;
+}
+
+.quota-form select {
+  font: inherit;
+  color-scheme: dark;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
 }

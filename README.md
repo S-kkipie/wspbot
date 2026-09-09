@@ -35,10 +35,10 @@ bot   → Done.
 |  |  |
 | --- | --- |
 | **What it is** | One Next.js container: a webhook that answers WhatsApp, and a dashboard that decides what it may do |
-| **Abilities** | 18 switchable features over 32 model tools, plus 3 that are always on |
-| **Storage** | Postgres, 13 tables — memory, history, stickers, schedules, spend |
+| **Abilities** | 25 switchable features over 49 model tools, plus 3 that are always on |
+| **Storage** | Postgres, 25 tables — memory, history, stickers, schedules, supporters, roadmap, spend |
 | **Runs on** | A Dokploy VPS behind Traefik, alongside the WhatsApp gateway it talks to |
-| **Guarded by** | 14 check scripts that exercise the real thing rather than asserting about it |
+| **Guarded by** | 20 check scripts that exercise the real thing rather than asserting about it |
 
 ## Contents
 
@@ -48,11 +48,11 @@ bot   → Done.
 
 **Use it** — [The landing page](#the-landing-page) · [The dashboard](#the-dashboard) · [Signing in](#signing-in) · [When it replies](#when-it-replies)
 
-**What it can do** — [Put things in the chat](#what-it-can-put-in-the-chat) · [Stickers](#stickers) · [Memory](#memory) · [The checklist](#the-checklist) · [Reactions](#reactions) · [Scheduled reminders](#scheduled-reminders) · [Scheduled summaries](#scheduled-summaries) · [Notion](#notion) · [Google Sheets](#google-sheets) · [Knows what it is](#what-it-knows-about-itself)
+**What it can do** — [GitHub](#github) · [Chiming in](#chiming-in) · [Put things in the chat](#what-it-can-put-in-the-chat) · [Stickers](#stickers) · [Rendering HTML](#rendering-html) · [Screenshots](#a-picture-of-a-real-page) · [Memory](#memory) · [The checklist](#the-checklist) · [Reactions](#reactions) · [Scheduled reminders](#scheduled-reminders) · [Scheduled summaries](#scheduled-summaries) · [Notion](#notion) · [Google Sheets](#google-sheets) · [Knows what it is](#what-it-knows-about-itself)
 
 **Keep it honest** — [Rate limiting](#rate-limiting) · [Usage and cost](#usage-and-cost) · [Moving context between groups](#moving-context-between-groups)
 
-**Chip in** — [What wapi is](#what-wapi-is) · [Open source, and the bill](#open-source-and-the-bill)
+**Chip in** — [What wapi is](#what-wapi-is) · [Supporters](#supporters) · [The roadmap](#the-roadmap) · [Open source, and the bill](#open-source-and-the-bill)
 
 ## Architecture
 
@@ -69,7 +69,7 @@ flowchart LR
     WA(["WhatsApp<br/>groups"])
     BROWSER(["Browser"])
     OPENAI(["OpenAI<br/>model · vision · speech · images<br/>web search"])
-    EXT(["Notion · Google Sheets"])
+    EXT(["Notion · Google Sheets · GitHub"])
 
     subgraph gw["wapi · self-hosted gateway, same VPS"]
         SESSION["session<br/>push only, never polled"]
@@ -80,16 +80,16 @@ flowchart LR
         HOOK["POST /api/wapi/webhook<br/>verify · ack · work in after"]
         GATE["mentions<br/>is this message for me?"]
         LIMIT["rate limit<br/>before anything costs money"]
-        REC["summary recorder<br/>untagged, recorded groups only"]
-        AGENT["agent<br/>system prompt + 32 tools"]
-        TIMERS["timers<br/>session 2m · reminders 30s · digests 1m"]
-        FEAT["features<br/>18 switches own every tool<br/>read from Postgres every turn"]
-        FF["ffmpeg<br/>stickers · voice · video"]
+        REC["recorder<br/>untagged, recorded groups only"]
+        AGENT["agent<br/>system prompt + 48 tools"]
+        TIMERS["timers<br/>session 2m · reminders 30s · digests 1m · chime-ins 1m"]
+        FEAT["features<br/>24 switches own every tool<br/>read from Postgres every turn"]
+        FF["ffmpeg · Chromium<br/>stickers · voice · video · rendering"]
         PROXY["proxy.ts<br/>gates every page but the root"]
         PAGES["landing · /dashboard"]
     end
 
-    PG[("Postgres<br/>13 tables")]
+    PG[("Postgres<br/>24 tables")]
 
     WA -->|"every message"| SESSION
     SESSION -->|"signed webhook"| HOOK
@@ -170,7 +170,7 @@ Same look as the landing page — forged gold on obsidian, Geist throughout — 
 same product. There is one theme rather than a light and a dark: the brand's resting state is
 obsidian, and a dashboard read beside the front door is better off matching it.
 
-Nine sections under `/dashboard`, each behind the sign-in:
+Fourteen sections under `/dashboard`, each behind the sign-in:
 
 | | |
 | --- | --- |
@@ -181,6 +181,11 @@ Nine sections under `/dashboard`, each behind the sign-in:
 | `/dashboard/memory` | What it has been told to remember |
 | `/dashboard/reminders` | Everything scheduled, across every chat |
 | `/dashboard/summaries` | Scheduled digests of a group |
+| `/dashboard/chime` | Groups it may speak in unprompted |
+| `/dashboard/leaderboard` | Where we stand in the vote, and who gets told |
+| `/dashboard/github` | The connected account, what it may write, and where |
+| `/dashboard/supporters` | Who has chipped in, and the Buy Me a Coffee sync |
+| `/dashboard/roadmap` | What to build next, and the votes behind it |
 | `/dashboard/move` | Move a group's context into another group |
 | `/dashboard/usage` | Tokens and spend, broken down by model and kind |
 
@@ -347,6 +352,10 @@ Beyond text, the bot decides for itself when one of these fits — you just ask 
 | "add that to the meeting notes page" | finds the page and appends it |
 | "make a sticker of a sleepy capybara" | draws one, transparent background, and keeps it |
 | "make a sticker from <gif link>" | downloads it and converts it, animation intact |
+| "publish that repo and send me the link" | switches GitHub Pages on and gives back the address |
+| "put the stickers on a web page" | commits every sticker, publishes it, sends the link |
+| "show me that as a table" | lays it out in HTML, renders it, sends it as a picture |
+| "render crafterstation.com and send a photo" | opens the page in a real browser, sends a screenshot |
 
 Notes on each:
 
@@ -367,6 +376,9 @@ Notes on each:
   in WhatsApp Web — a browser decodes whatever the OS can — and the mobile app refuses it, so
   the bug is invisible on a laptop. `npm run voice-check` verifies the container and codec with
   ffprobe. Six voices, and the bot can be asked for a delivery style ("warm and unhurried").
+- **A table, a card or a scoreboard is drawn, not typed.** WhatsApp has no layout — a table
+  pasted as text wraps into nonsense on a phone — so the bot writes HTML and sends a picture of
+  it. [Rendering HTML](#rendering-html) covers how.
 - **Polls** take 2–12 options and can allow multiple choices. Duplicate options are removed
   first — WhatsApp drops them silently, which would quietly turn a 3-option poll into 2.
 - When a tool has already put something in the chat, the bot sends at most one short line after
@@ -472,6 +484,89 @@ are sent.
 
 Everything collected is shown on `/`.
 
+## Rendering HTML
+
+WhatsApp has no layout. A table typed as text wraps into nonsense on a phone, and asterisks are
+the whole formatting vocabulary. So when the answer *is* a layout — a comparison, a schedule, a
+scoreboard, a receipt, who owes what — the bot writes HTML and sends a picture of it.
+
+Ask for it (*"show that as a table"*, *"send it as an image"*) or leave it to the bot; it reaches
+for the tool on its own when the meaning is in the arrangement.
+
+**Rendered by Chromium, and that choice is the feature.** Next already bundles satori through
+`next/og`, which would have cost nothing to adopt and lays out a hand-built flexbox card
+beautifully. It also renders
+
+```html
+<table><tr><td>Ana</td><td>3</td></tr><tr><td>Beto</td><td>1</td></tr></table>
+```
+
+as `Ana3Beto1`, on one line — no error, no warning, just wrong, because it implements a CSS
+subset with no table layout. Since the point is rendering HTML written for a person to read, and
+a table is the likeliest thing anyone asks for, that subset is the one thing that cannot be
+accepted. Chromium costs about 180MB in the image and renders what it is given. `npm run
+render-check` compares a table's height against the same rows stacked as blocks, so a regression
+to a subset renderer fails rather than shipping a one-line picture.
+
+**Nothing is fetched. At all.** The HTML is written by a model, shaped by whatever somebody typed
+into a group chat, and a browser that will load a URL is a browser that can be aimed at
+`169.254.169.254`. Every request that is not a `data:` URI is aborted before it leaves — external
+stylesheet, webfont, remote image alike. Same stance as the SSRF guard on media, enforced a
+different way, and blocked URLs are *reported back to the model* rather than swallowed: a page
+whose stylesheet never arrived still renders, just unstyled, and nothing else would tell it the
+difference between that and its own bad markup.
+
+The rest is bounds. Width is clamped to 320–1200 and the height comes from the content, so a
+short card is not padded with white and a long table is not cropped; the render is capped at
+4000px, given 15 seconds, and drawn at `deviceScaleFactor: 2` so text stays sharp after WhatsApp
+scales it down. Renders are **serialised** — Chromium spikes a couple of hundred megabytes, and
+this box also runs Postgres and the whole wapi stack, so two at once is how a chat bot causes an
+out-of-memory kill somewhere else entirely.
+
+### A picture of a real page
+
+The renderer above cannot screenshot a website, by construction — it fetches nothing. So taking
+a picture of a link is a second function with the opposite network stance, deliberately not the
+same code path with a flag deciding whether the guard runs.
+
+Reaching the internet is precisely the hole the renderer was written not to have, so the guard is
+kept rather than dropped: the same `assertPublic` that guards every media download is applied to
+the page **and to each subresource it pulls**, since a public page can carry an
+`<img src="http://169.254.169.254/…">` and a browser would fetch it without comment.
+
+DNS is checked twice, and the second check is the one that catches an attack:
+
+1. **Before connecting** — the hostname is resolved and every address it answers with is
+   rejected if it is private. That covers the obvious.
+2. **After connecting** — the address Chromium *actually reached* is read back off the response
+   and checked again. In between, a hostname under someone else's control can change what it
+   resolves to, and the first check cannot see it, because Chromium resolves the name itself,
+   separately, after we looked. On a mismatch the picture is discarded and the call fails.
+
+Writing that check is what exposed a real hole in the guard it reuses: `new URL()` rewrites
+`http://[::ffff:169.254.169.254]/` to the host `::ffff:a9fe:a9fe` — the same address, spelled in
+hex — and the pattern that matched the dotted form saw the hex form as public internet. The
+metadata endpoint was reachable through any feature that takes a URL, stickers included. IPv6 is
+now parsed into its eight groups instead of pattern-matched, so every spelling of an embedded
+IPv4 address — mapped, the deprecated compatible form, and the NAT64 prefix — lands on the same
+answer. `npm run sticker-check` covers each of them.
+
+The page gets none of the bot's own credentials: a fresh browser, no cookies, no logins, and
+anything behind a sign-in screenshots as the sign-in screen.
+
+Getting a picture of the *site* rather than of its scaffolding is most of the remaining work. A
+single-page app fires its load event with an empty `<div id="root">`, so the wait is on content —
+text, or an image — not on the event. The page is then scrolled once so lazy images actually load
+instead of photographing a skeleton, and `document.fonts.ready` is awaited, since a page caught
+mid font-swap looks broken. `navigator.webdriver`, which is true for any browser driven over CDP
+and which a good number of sites read, is hidden: that evades no login and no paywall, it is the
+difference between a picture of the site and a picture of "checking your browser".
+
+```bash
+npm run render-check    # a real browser: a real PNG, a table that is a table, nothing fetched,
+                        # every private address refused, and one real page captured
+```
+
 ## What it knows about itself
 
 Ask it what it runs on, how it works, or who made it, and it answers from `lib/about.ts` rather
@@ -552,6 +647,129 @@ sunset that repository. The direct API costs one file and no infrastructure.
 Pinned to Notion API version `2026-03-11`. Versions are dated and response shapes change between
 them, so the header is explicit rather than left to a default.
 
+## GitHub
+
+The bot has its own GitHub account. It can look repositories and issues up for anyone, and —
+where it has been given permission — open issues, comment on them, and create repositories.
+Configured entirely on `/dashboard/github`; there is no environment variable to set.
+
+**Not `gh`, and not an MCP server.** Both are wrappers over the same REST endpoints, so neither
+would move this feature forward. The hard part is not calling GitHub — it is that *anyone in a
+group can ask*. "Open an issue on that repo" is a sentence a stranger can type into a chat, so
+what matters is the layer in front of the call: an allowlist, a switch per operation, a daily
+ceiling. `gh` has no idea which repositories this bot may write to. That decision has to live
+here, which means the call may as well be a `fetch` — and one without a 30MB package and a
+process spawn per call.
+
+**Two layers of permission, and they are not interchangeable.**
+
+1. **What the token can do**, decided on GitHub when it is issued. This is the real boundary:
+   nothing here can exceed it. A fine-grained token scoped to three repositories is worth more
+   than every switch below, which is why the page asks for one of those.
+2. **What the bot may do with it**, decided on the dashboard — always the tighter of the two,
+   because the token is issued once and the bot is exposed to a group chat all day.
+
+**Committing files.** `github_put_files` writes whole files into a repository as **one commit**.
+One commit, not one per file, and that is the reason it uses the git data API rather than the
+contents endpoint: a site is a set of files that only make sense together, and a request per file
+means a half-published site when the fourth one fails, plus a Pages build kicked off for each.
+The tree is built on top of the existing one, so anything not named is left exactly as it was.
+
+**The sticker library as a website.** `github_publish_stickers` does the whole sequence on its
+own: builds a gallery page, commits every sticker into a repository, switches Pages on, and hands
+back the address.
+
+The stickers are committed as **files, not links**. A wapi URL dies with the session that
+uploaded it, so a page built from those links is a page of broken images the day the bot's number
+changes — the bytes are already in Postgres for exactly this reason, and the site carries its own
+copies.
+
+There is a **budget**, and it is not arbitrary: the real library is 313 stickers and 49MB.
+Publishing all of it is a 49MB commit built from 313 sequential blob uploads — minutes of API
+calls for one chat message. So the newest are taken up to 150 stickers or 20MB, whichever comes
+first, and the bot says how many were left out. Choosing what fits is done from a list of byte
+counts rather than from the pictures themselves, because dragging 49MB out of Postgres to use
+20MB of it is slow enough to be cancelled mid-flight.
+
+**Publishing a repository as a website.** `github_pages` switches GitHub Pages on for a
+repository and answers with its public address. It is idempotent, because "deploy it" and "what
+is the URL?" are the same question asked twice: a repository that is already published returns
+the same address and gets a fresh build requested, rather than an error about it already
+existing.
+
+**Pages needs a public repository.** It is free on public ones and a paid feature on private
+ones, so publishing a private repository fails with *"Your current plan does not support GitHub
+Pages for this repository"* — a true sentence that says nothing about the fix. `github_repo` takes
+the visibility as a deliberate choice, `github_set_visibility` changes it afterwards, and the
+error names the remedy.
+
+Making a repository **public** is governed by the same setting that governs creating public ones,
+because the two are the same act with the same consequence: everything in that repository, and
+every commit ever made to it, in front of the world — from a chat message. Going *private* needs
+only the repository-administration switch. The bot cannot grant itself either.
+
+Two more things about Pages that are easy to be caught by, and which the bot is told to say out
+loud:
+
+- **The address exists before the site does.** GitHub returns `html_url` the moment Pages is
+  switched on, while the first build takes a minute or two — so a link handed over immediately
+  404s for a while. The build status comes back with it, and the bot says which it is.
+- **It needs admin on the repository**, which in practice means one the bot's own account owns.
+  A private repository cannot have a public site at all without a paid plan.
+
+**Two lists, and they answer different questions.** *Where it can be used* is who may ask —
+every chat, or only the groups you tick. *Repositories it may write to* is where writes land. A
+group can be trusted to file issues on one repository without every group being able to, and the
+two move for different reasons: one when a room is adopted, the other when a repository is. A
+chat GitHub is switched off in is never told it exists, so the bot does not offer something it
+would then refuse.
+
+Reading is open: a public repository is public, and gating "how many stars does X have" would
+make the feature useless without making anything safer. Writing is off entirely until switched
+on, and then:
+
+- it lands **only on repositories named on the dashboard** — an empty list means nowhere, which
+  is the correct state for an account that has just been connected
+- it is **capped per day**, counted across every chat, so a bad day has a ceiling
+- every issue and comment **carries the name of whoever asked for it**, and is recorded with the
+  chat it came from. An issue that appears on a repository with no idea where it came from is
+  what makes a maintainer switch this off
+- a repository the bot creates is **private unless you decided otherwise in advance** — "make it
+  public" from a group chat is exactly the request that should not be enough on its own
+
+The token is sealed with AES-256-GCM before it is stored, keyed off `AUTH_SECRET`. It is the one
+credential here that can create repositories on an account and it is never read back by a person
+— the page shows four characters — so there is no cost to it being unreadable in a dump of that
+table. Notion's per-chat tokens are not sealed, deliberately: they are grants to whichever pages
+somebody shared, not to an account.
+
+**Which token, and this is the part that catches people.** A fine-grained token can only be
+granted repositories **its own account owns**, or an organisation's where that was allowed. A
+repository belonging to somebody else never appears in its picker, so it cannot be selected, so
+the token has no permission on it — while still reading it perfectly well if it is public. That
+combination produces a bot that answers questions about a repository all day and refuses to open
+an issue on it, with a valid token, the right switches, and the repository on the allowlist.
+
+So:
+
+| The repository belongs to | Use |
+| --- | --- |
+| the bot's own account | a **fine-grained** token, `Issues: read and write` + `Contents: read`, plus `Administration: read and write` only to create new ones |
+| an organisation | a **fine-grained** token, if the organisation has allowed them; otherwise classic |
+| somebody else — your own personal account included | a **classic** token: `public_repo` is enough to open issues on a public repository, since any account may do that. `repo` plus being added as a collaborator for a private one |
+
+The dashboard judges each allowlisted repository against the token that is installed and says
+which of these you are in, so the answer is on the page rather than in a group chat.
+
+**Setting it up.** Make the token on the bot's account under `Settings → Developer settings →
+Personal access tokens`, paste it on `/dashboard/github`, tick what it may do, and add the
+repositories it may write to.
+
+```bash
+npm run github-check    # the refusals: which chats may ask, the allowlist, each switch, the
+                        # daily ceiling, and whether the installed token can really write there
+```
+
 ## Google Sheets
 
 Share a spreadsheet link and ask about it — *"what's missing?"*, *"who hasn't replied?"* — and
@@ -626,6 +844,125 @@ hours. The page shows the next run so you can see the pattern does what you mean
 Each schedule keeps a watermark and summarises only what has happened since its last **successful**
 run, so nothing is covered twice and a failed run is retried at the next firing rather than
 skipping a day.
+
+## Chiming in
+
+Everything else here starts with somebody tagging the bot. This is the one thing that starts
+with the bot deciding, on its own, that a person in the room would have said something by now.
+
+Enable it per group on `/dashboard/chime`, and it reads along and occasionally speaks — an
+answer to a question nobody picked up, something it was asked to remember, a sticker where a
+sticker is the right move. One or two short messages, in the language the group is speaking, and
+it can use anything it normally can: a sticker, a voice note, a picture, a rendered table.
+
+**It goes through the ordinary turn.** A chime written by a second, smaller prompt would be a
+different bot living in the same group: no memory, no stickers, no idea what it is. Running it
+through `reply()` means the thing that speaks unprompted is the same thing people talk to. What
+differs is the invitation — a stage direction rather than a message from a person, and a prompt
+that says plainly that nobody asked it anything.
+
+**Most of the feature is restraint**, because the failure mode is not an error, it is being
+annoying. A chime needs all of these at once:
+
+| Condition | Default | Why |
+| --- | --- | --- |
+| Time since the last one | 90 min | the floor on how often it may speak |
+| New messages since then | 8 | so it joins a conversation instead of talking to an empty room |
+| Newest of them within | 25 min | so it does not answer this morning as if it had just been said |
+| Outside quiet hours | 23:00–08:00 | the one failure nobody would forgive is a 4am notification |
+| Under the daily cap | 4 | a hard ceiling regardless of how lively the day is |
+
+Any of them failing means silence — and **silence is also a normal result of the turn itself**.
+The prompt is explicit that saying nothing is the usual answer, since a model handed a
+transcript will always find something to say, and a bot that comments on everything is the one
+everyone mutes. An empty answer sends nothing, and the watermark still moves: a conversation it
+decided to sit out should not be reconsidered an hour later.
+
+Each group can carry a note — *"work group, keep it dry"*, *"friends, jokes are fine"* — which
+changes what it says considerably more than any of the numbers do.
+
+**Enabling a group records it**, exactly as a summary schedule does, into the same table with
+the same fortnight of retention. There is no other way to know whether anything is worth saying.
+The bot answers honestly when anyone asks whether it is listening, and the page says so before
+you switch anything on.
+
+```bash
+npm run chime-check     # the cadence, the cap, quiet hours across midnight, and the claim
+```
+
+## Following a vote
+
+A hackathon leaderboard is a page somebody reloads forty times a day. The bot follows it instead,
+and answers the only question anyone is actually asking: **how many votes to take the next
+place.**
+
+Ask it in a chat — *"¿cómo vamos?"* — and it reads the live count and says. `LEADERBOARD_URL` is
+the board and `LEADERBOARD_SLUG` is which project on it is ours; without both, the ability is not
+offered at all rather than offered and broken.
+
+**Every figure is read; none is taken off a picture.** A screenshot was the obvious build —
+`capture` already exists, the page looks good — and as the *source* it is wrong twice over. It
+makes the model read figures off an image, which is the one place it is confidently wrong, and it
+starts Chromium on a box that is also running Postgres and the whole wapi stack. Read from the
+board's own data the numbers are exact and free.
+
+A picture is still attached to a scheduled announcement, with the figures as its caption, and the
+two are not in tension: a message nobody asked for has to be worth opening, and a league table is
+a thing people want to look at. It costs one browser run per message that actually goes out —
+bounded by the daily cap — and a capture that fails costs the picture, not the message.
+
+**Ties share a position, and that is where the bug lives.** "The next place" is not the row above
+in the table: eight projects on nought votes are all seventeenth, and passing them costs two
+votes, not one. So the gap is measured against the next *distinct* vote total, and everyone
+holding it has to be passed. Two answers come out of it, because they are different questions —
+`23` to pass the place above, `22` to draw level and share it.
+
+**First place is a third question, and the only one the board does not answer.** The page
+publishes the next objective and nothing else, so "how far off winning are we?" — the thing
+anybody in the running actually wants — is computed here, against the top total and with the same
+tie rule. From second the two collapse into one number, and the message says it once rather than
+printing it twice under two headings.
+
+`npm run leaderboard-check` pins that with fixtures, and then does something better: it reads the
+live board twice, as JSON and as HTML, and compares our arithmetic against the arithmetic the
+site prints for itself. Two implementations agreeing is worth more than any assertion written by
+hand — and a redesign that removes the phrase fails the check rather than quietly blinding it.
+
+### Telling a group
+
+`/dashboard/leaderboard` sets up groups that hear about it. As with chime-ins there is no tool
+for this and it cannot be arranged from a chat: a watch belongs to the *chat*, not to the person
+who asked, so one person switching it on commits the whole room to recurring notifications.
+
+**The announcement does not go through the model.** A chime does, because what it says is a
+judgement; this sentence is a subtraction. A model in this path could add nothing but latency,
+cost, and the one failure that would matter — a number that is almost right.
+
+Restraint again, for the same reason as chime-ins:
+
+| Condition | Default | Why |
+| --- | --- | --- |
+| Only when it moves | on | a place, a vote count or a gap that changed. Off, it sends on every check — which is how a group learns to mute the bot |
+| Attach a picture | on | a screenshot of the board, captioned with the figures. Off is text only |
+| How often it looks | every 10 min | a ceiling, not a timer |
+| Outside quiet hours | 23:00–08:00 | the one failure nobody would forgive is a 4am notification |
+| Under the daily cap | 6 | counted in a local day |
+| Before the vote ends | — | worth setting: without it the bot is still announcing a frozen board next month |
+
+The snapshot each group was last told is what "moved" is measured against, and it advances only
+after a message has **actually gone out** — a standing that changed while the send was failing
+has to still read as changed on the next tick, or the one announcement anybody cared about is the
+one that gets skipped. A failure is recorded on the dashboard and never sent to the group: a
+board that would not load is not worth a message, and a daily apology is how a useful
+notification becomes noise.
+
+The dashboard shows the live standing above the rows, in the same words the bot would use, and
+every row has **Send now** — which is the difference between finding a problem in a minute and
+finding it tomorrow.
+
+```bash
+npm run leaderboard-check # the gap arithmetic, ties included, against the board's own answer
+```
 
 ## Moving context between groups
 
@@ -798,6 +1135,8 @@ insert into memories (chat, text) values ('global', 'the office wifi password is
 | `BOT_TIMEZONE` | `UTC` | What "9am" means. Reminders and summary schedules are wrong without it. |
 | `BOT_SUMMARY_MODEL` | `gemini-2.5-flash` | Writes the scheduled digests. Worth the top tier: it runs rarely, on a long transcript, and a digest that drops the decision is worse than none. |
 | `BOT_RATE_LIMIT_PER_MINUTE` | `1` | Default allowance per person. Override individuals on `/dashboard/limits`. |
+| `LEADERBOARD_URL` | — | The public vote board to follow. Unset, the leaderboard is not offered at all. |
+| `LEADERBOARD_SLUG` | — | Which project on that board is ours. Needed alongside the URL; one without the other does nothing. |
 
 Replies are requested at low verbosity — a WhatsApp message that needs scrolling has already
 failed. The bot's manners live in the system prompt in `lib/agent.ts`.
@@ -813,11 +1152,18 @@ npm run cron-check      # the cron evaluator, including both daylight-saving tra
 npm run contrast-check  # what the landing page text actually resolves to, and its contrast
 npm run summary-check   # one real digest end to end (costs money, needs DATABASE_URL)
 npm run transfer-check  # moving context between two throwaway groups (needs DATABASE_URL)
+npm run supporters-check # identity matching, the picker, and the coffee API if a token is set
+npm run roadmap-check   # supporter weighting, the vote cap, and the double-vote guard
 npm run sticker-check   # real ffmpeg conversion: 512x512, animated, under size ceilings
 npm run voice-check     # voice notes really are Ogg/Opus mono 48kHz, per ffprobe
 npm run video-check     # video really is H.264/yuv420p/AAC in MP4, per ffprobe
 npm run models-check    # the configured models accept the parameters this app sends (costs money)
 npm run draw-check      # generates one real image and checks alpha survives (costs money)
+npm run github-check    # every GitHub refusal, and one real read (needs DATABASE_URL)
+npm run chime-check     # chime-in restraint: cadence, daily cap, quiet hours, double-claim
+npm run leaderboard-check # the gap arithmetic, ties included, against the board's own answer
+npm run render-check    # a real Chromium render, and a real page captured: a PNG, a table that
+                        # stays a table, and every private address refused
 npm run build           # typecheck and production build
 ```
 
@@ -911,6 +1257,98 @@ Details that still cost real debugging time:
 
 Background on all of it: `.agents/skills/wapi-nextjs/references/api-notes.md`.
 
+## Supporters
+
+`/dashboard/supporters` is the list of people who have helped pay for this — **names and how they
+helped, never amounts.** There is nothing else to store: the point is to say thank you, not to
+keep accounts.
+
+The two sources work differently, because they have to:
+
+| | |
+| --- | --- |
+| **Yape** | Entered by hand. It is a bank transfer, and the only record is a screenshot on somebody's phone — there is nothing this app can read. |
+| **Buy Me a Coffee** | Both pulled and pushed. `BUYMEACOFFEE_TOKEN` gives the page a **Pull supporters** button; a webhook pointed at `/api/coffee/webhook` means new ones arrive on their own. |
+
+A supporter can be tied to a **WhatsApp identity**, and that is what makes the list do something
+rather than just sit there:
+
+- On `/dashboard/limits`, the person field is a searchable picker over everyone this deployment
+  knows an identity for — supporters, people with a quota, recent callers, reminder owners —
+  with a ★ against anyone who has chipped in. You type a name instead of pasting a raw JID.
+- The bot can read the list out. Ask it who supports it and it names them.
+
+Tying is optional: somebody can put money in without the bot ever needing to know which chat
+participant they are.
+
+### The Buy Me a Coffee webhook
+
+Create a webhook in their developer portal pointed at `APP_URL/api/coffee/webhook`, and set its
+signing secret as `BUYMEACOFFEE_WEBHOOK_SECRET`. Subscribe to `donation.created` and its siblings
+— the supporters page lists exactly which.
+
+It is shaped like the wapi receiver, for the same two reasons. The signature is **HMAC-SHA256 over
+the raw body**, in `x-signature-sha256`, verified before anything parses the JSON — `req.json()`
+would consume the stream and leave nothing to hash. And the delivery is **acknowledged first**,
+with the work done in `after()`: a failed delivery is retried four more times with exponential
+delays, so a slow handler would turn one coffee into five.
+
+Two deliberate refusals. Without a signing secret the route answers `503` rather than accepting
+unverified writes into the list. And their **Send test event** button, which sets
+`live_mode: false`, is accepted and *not* stored — it proves the endpoint and the secret without
+inventing a supporter.
+
+**One person can hold several identities, and usually does.** WhatsApp gives the same human a
+phone JID, a LID and now a username, and none of them is derivable from the others — wapi maps a
+phone to a LID and back, and nothing resolves a username at all. So somebody who is
+`188025162178706` to the bot in a group and `_cris.fast` to his friends needs both recorded, or
+whichever one you did not type simply never matches and nothing says why.
+
+The field takes a **comma-separated** list, in any spelling: `51999888777, +51 999 888 777,
+@username, 188025162178706`. Commas rather than spaces, because a space belongs inside a phone
+number far more often than between two identities. Each is normalised to exactly the shape the
+webhook derives from an incoming sender, and `npm run supporters-check` asserts that specific
+equality — if those two ever drift, the star simply never appears.
+
+Votes key on the **supporter**, never on the identity used to cast them, so backing something as
+your LID and again as your username counts once.
+
+## The roadmap
+
+Supporters decide the order things get built in. Ask the bot what is next, back what you want, or
+suggest something — all in the chat, since the identity is already there.
+
+**Voting ranks things. It never switches a feature on.** That is not a simplification: `features`
+is keyed on `key` alone, so it is global, and one supporter "unlocking" summaries would turn it on
+for every group the bot sits in. The roadmap produces an order; a human still builds the thing.
+
+| | |
+| --- | --- |
+| **Weight** | Your coffee count — a count, never money, so the supporters page keeps its promise. |
+| **Cap** | `min(coffees, 5)`. Gratitude stays uncapped and the true count still shows; only influence saturates. |
+| **Decay** | None. A coffee from last year still counts. |
+| **Open votes** | Three at a time. A fourth asks you to drop one; a shipped item frees its slot automatically. |
+| **Proposing** | Supporters suggest, Jibaru approves. Curated list, open suggestions. |
+
+The weight is looked up when the tally is computed rather than stored on the vote, so buying
+another coffee retroactively strengthens every vote you already hold — and a supporter removed
+from the list takes their weight out with them.
+
+Counts are public on the landing page; **who voted for what never is.** Naming that would turn a
+small group's preferences into a public record.
+
+Supporters also get a higher rate limit — `BOT_SUPPORTER_RATE_LIMIT`, five a minute by default.
+It is computed rather than stored, so removing somebody reverses it; an explicit row on
+`/dashboard/limits` still overrides.
+
+```bash
+npm run roadmap-check   # the weighting, the cap, and the double-vote guard
+```
+
+That last one is the reason the check exists. Voting twice must not double a weight — it is a
+primary key on `(item_id, supporter_id)`, it costs nothing at write time to get wrong, and it corrupts
+every tally afterwards without anything saying so.
+
 ## Open source, and the bill
 
 Both halves are open, and a star is the only thing either asks for:
@@ -948,7 +1386,12 @@ lib/tasks.ts                     the per-chat checklist
 lib/reminders.ts                 scheduled work; lib/reminder-runner.ts fires it
 lib/rate-limit.ts                per-person quotas, checked before anything costs money
 lib/transfer.ts                  moving a group's context into another group
+lib/supporters.ts                who chipped in; the Buy Me a Coffee client
+lib/roadmap.ts                   what to build next, and the weighted tally
+lib/people.ts                    every identity this deployment knows, for the picker
 lib/summaries.ts                 scheduled digests: schedules, the message log, the transcript
+lib/chime.ts                     chiming in: which groups, how restrained, and why not now
+lib/chime-runner.ts              fires it, through the ordinary turn
 lib/summary-recorder.ts          writing down a recorded group, describing its pictures
 lib/summary-runner.ts            composing a digest and posting it
 lib/cron.ts                      five-field cron, as "does this minute match?"
@@ -964,11 +1407,15 @@ lib/wapi.ts                      thin facade over the vendored SDK
 lib/wapi-sdk/                    the official wapi SDK, vendored
 lib/stickers.ts                  the sticker library: decrypt, dedupe, describe, store
 lib/sticker-maker.ts             ffmpeg: anything -> 512x512 WebP, animation preserved
+lib/render-html.ts               Chromium: model-written HTML -> a picture, with no network
 lib/audio.ts                     TTS output -> Ogg/Opus, the voice-note format
 lib/video.ts                     anything -> H.264/AAC MP4, the format that plays
 lib/ffmpeg.ts                    shared ffmpeg runner and scratch directories
 lib/fetch-media.ts               guarded remote downloads (SSRF, redirects, size cap)
 
+lib/github.ts                    GitHub: the account, the permission layer, the REST client
+lib/sticker-site.ts              the sticker library as a static site, ready to commit
+lib/secret-box.ts                sealing the one credential that should not be legible in a dump
 lib/notion.ts                    Notion OAuth and the page operations
 lib/oauth-state.ts               the signed state that binds a connection to a chat
 lib/sheets.ts                    Google Sheets, read and write

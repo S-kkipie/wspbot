@@ -27,7 +27,8 @@ WhatsApp ──▶ wapi ──POST /api/wapi/webhook──▶ this app
                                                  └─▶ wapi, via the vendored SDK ──▶ WhatsApp
 
 you ──▶ / (public) ──▶ /login ──▶ proxy.ts ──▶ /dashboard/{features,limits,stickers,
-                                       │           memory,reminders,summaries,move,usage}
+                                       │           memory,reminders,summaries,chime,
+                                       │           github,supporters,roadmap,move,usage}
                                        └─▶ features table ──▶ which tools a turn is given
 ```
 
@@ -51,6 +52,13 @@ lib/tasks.ts                     the per-chat checklist
 lib/reminders.ts                 scheduled work; lib/reminder-runner.ts fires it
 lib/rate-limit.ts                per-person quotas, checked before anything costs money
 lib/transfer.ts                  moving a group's context into another group (dashboard only)
+lib/supporters.ts                who chipped in; Yape by hand, Buy Me a Coffee by API
+lib/roadmap.ts                   supporter-weighted voting on what to build next
+lib/people.ts                    identities gathered from four tables, for the rate-limit picker
+lib/chime.ts                     chiming in: which groups, how restrained, and why not now
+lib/chime-runner.ts              fires it, through the ordinary turn
+lib/leaderboard.ts               a public vote board: the gap to the next place, and who is told
+lib/leaderboard-runner.ts        fires it, without the model — the sentence is a subtraction
 lib/summaries.ts                 scheduled digests: schedules, the log, the transcript
 lib/summary-recorder.ts          writing down a recorded group; lib/summary-runner.ts fires it
 lib/cron.ts                      five-field cron, evaluated as "does this minute match?"
@@ -81,12 +89,16 @@ lib/sticker-maker.ts             ffmpeg: anything -> 512x512 WebP
 lib/audio.ts                     TTS output -> Ogg/Opus
 lib/video.ts                     anything -> H.264/AAC MP4
 lib/ffmpeg.ts                    shared ffmpeg runner + scratch dirs
+lib/render-html.ts               Chromium: the bot's own HTML -> a picture, no network at all
+lib/sticker-site.ts              the sticker library as a static site, ready to commit
 lib/fetch-media.ts               guarded remote downloads (SSRF)
 ```
 
 **Integrations and plumbing**
 
 ```
+lib/github.ts                    GitHub: the account, the permission layer, the REST client
+lib/secret-box.ts                AES-256-GCM sealing for the GitHub token (and only that)
 lib/notion.ts                    Notion OAuth + page operations
 lib/oauth-state.ts               signed OAuth state (no server-only, so it is testable)
 lib/sheets.ts                    Google Sheets read and write
@@ -171,10 +183,29 @@ like a simplification opportunity.
 - **The model gets picture numbers, not row ids.** Asked to cite `#4821` it answers `3`, meaning
   the third picture. `summaries.render` numbers them 1..n per digest and returns the mapping in
   the same call, so the numbering and the lookup cannot drift apart.
-- **Recording is the only place the bot reads messages nobody sent it.** Gated on the feature
-  *and* on the chat being the source of an enabled schedule, cached for 30s because it is
-  consulted for every message in every group. `systemPrompt` tells the bot when the room it is
-  in is being recorded, so "are you logging this?" gets a true answer.
+- **Recording is the only place the bot reads messages nobody sent it.** Two features want it
+  now — a digest's source group, and a group it may chime into — so the gate is an `or` of two
+  cached lists, each gated on its own feature. `systemPrompt` tells the bot when the room it is
+  in is being recorded *and which reason applies*, so "are you logging this?" gets a true answer
+  either way. Adding a third reason means adding it in both places, or the bot denies something
+  that is happening.
+- **A chime is the ordinary turn, not a second prompt.** `chime-runner` calls `reply()` with
+  `unprompted: true`. Anything else would be a different bot in the same group: no memory, no
+  stickers, no self-description. `unprompted` changes exactly two things — the prompt says
+  nobody asked, and an empty answer stays empty instead of becoming "Sorry, I got tangled up",
+  which would turn every decision to stay quiet into an apology nobody can parse.
+- **Silence has to be an allowed answer, and it has to move the watermark.** A model handed a
+  transcript will always find something to say, so the prompt says plainly that saying nothing is
+  normal. The watermark moves anyway: a conversation it decided to sit out must not be
+  reconsidered an hour later, or it will eventually talk itself into commenting.
+- **`last_chime_at` moves on the claim, not on success** — the reminder bug, one table over. And
+  the claim's `$2::timestamptz` cast is load-bearing: without it pg types the parameter from its
+  neighbour and reads it as interval minus interval, which is a runtime error, not a build one.
+- **Quiet hours wrap around midnight**, so 23→8 contains neither endpoint in the usual order.
+  Getting it backwards means messaging a group at four in the morning, which is the one failure
+  here nobody forgives. `npm run chime-check` asserts both directions, and the daily cap in a
+  local day rather than a UTC one.
+- **`new URL()` rewrites an IPv6 host, and it broke the SSRF guard.**
 - **The wapi SDK is vendored, not installed, and needs one edit on the way in.** It is not
   published to npm; `npm run vendor-wapi-sdk` fetches it with `giget` and then strips the `.js`
   suffix from its relative imports. That second step is not cosmetic: the SDK is written for
@@ -191,6 +222,46 @@ like a simplification opportunity.
 - **`ADMIN_PASSWORD_HASH` is base64, not the raw hash.** Docker Compose interpolates `$NAME` in
   env values, and a bcrypt hash is full of `$`. A raw hash arrives as `$2b$12` and every sign-in
   fails as "wrong password". `lib/config.ts` checks the shape and refuses a mangled one loudly.
+- **Voting ranks; it never switches a feature on.** `features` is keyed on `key` alone, so it is
+  global — an "unlock" by one supporter would turn a feature on for every group the bot sits in.
+  If that ever needs to change, it is a per-chat feature table, not a tweak.
+- **A vote's weight is not stored on the vote.** It is joined from `supporters` at tally time, so
+  another coffee strengthens every vote already held and a removed supporter takes their weight
+  with them. Storing it would need a backfill nobody would remember to run.
+- **Voting twice must not double a weight.** The primary key on `roadmap_votes (item_id, handle)`
+  is the only thing preventing it, it costs nothing at write time to lose, and it corrupts every
+  tally afterwards in silence. `npm run roadmap-check` asserts it directly.
+- **The landing page is now `revalidate = 300`, not fully static.** The vote counts made it
+  database-backed; the cache is what keeps `/` fast and keeps it serving when Postgres is not.
+  A dashboard change revalidates it, so an approved item does not sit invisible for five minutes.
+- **The supporter rate limit is computed, never stored.** `quotaFor` consults the supporters list.
+  A row written on becoming a supporter would outlive their removal and nobody would notice.
+- **One person, several WhatsApp identities.** A phone JID, a LID and a username are all the same
+  human and none is derivable from the others — wapi maps phone to LID and back, nothing resolves
+  a username. `supporter_handles` holds them all; `supporters.handle` was a single column and is
+  migrated into it and dropped. Recording one identity means the other silently never matches.
+- **Votes key on `supporter_id`, not on the handle used.** Otherwise one person backs the same
+  item once as their LID and once as their username. The primary key is what enforces it.
+- **`parseHandles` splits on commas, not spaces.** `+51 999 888 777` is one identity written the
+  way people write it; splitting on whitespace turned it into four that matched nothing.
+- **A check must never use a real identity.** `tie` moves a handle on conflict — right for the
+  dashboard, where the case is fixing a typo — so a check written with a genuine one steals it and
+  then destroys it on cleanup. It did exactly that once.
+- **A supporter's handle must normalise to what the webhook derives.** A sender arrives as
+  `51999888777:12@s.whatsapp.net` and `mentions.identityKey` reduces it to bare digits, so
+  `supporters.normalise` has to land on the same string from `+51 999 888 777` or the star never
+  appears — silently, since both rows exist and simply never meet. `npm run supporters-check`
+  asserts that equality directly.
+- **Buy Me a Coffee paginates Laravel-style, five to a page.** `/api/v1/supporters` answers
+  `data` plus `next_page_url`, so reading only the first page silently stops at five supporters.
+  Verified against the live account. `/subscriptions` and `/extras` answer **200** with
+  `{"error": "No subscriptions"}` when empty — a state, not a failure.
+- **The coffee webhook signs with HMAC-SHA256 over the raw body**, hex, in `x-signature-sha256`.
+  Verify before parsing, and note `timingSafeEqual` **throws** on a length mismatch — a truncated
+  signature has to be refused, not crash the route. A `live_mode: false` delivery is their test
+  button: accept it, do not store it.
+- **An unauthenticated call there redirects rather than 401ing**, so the client sets
+  `redirect: "manual"` — following it would turn a bad token into a page of HTML parsed as JSON.
 - **Moving context between groups is dashboard-only, and there is no tool for it.** Same reason
   as rate limits: anything the bot can do, anyone in a chat can ask it to do, and "move that
   group's notes into this one" is not a call the bot can make. Adding a tool for it would let one
@@ -233,6 +304,172 @@ like a simplification opportunity.
 - **`next start` does not serve this app.** `output: "standalone"` means the built server is
   `.next/standalone/server.js`; `next start` prints a warning and then behaves differently enough
   to mislead. Test a production build with `node .next/standalone/server.js`, or in Docker.
+- **satori cannot render a table, and says nothing.** `next/og` is already in the tree and was
+  the obvious way to draw HTML. Given `<table><tr><td>Ana</td><td>3</td></tr>…` it emits
+  `Ana3Beto1` on one line — its CSS subset has no table layout, and there is no error. A table is
+  the likeliest thing anyone asks to be drawn, so `lib/render-html.ts` is Chromium.
+  `npm run render-check` measures a table against the same rows stacked, because "it rendered
+  something" is exactly what this bug looks like.
+- **The render browser fetches nothing, and reports what it refused.** That HTML is
+  model-authored and shaped by whatever was typed in a group, so anything but a `data:` URI is
+  aborted — same threat as `lib/fetch-media.ts`, enforced by request interception instead.
+  Blocked URLs go back to the model: a page whose stylesheet never arrived still renders, just
+  unstyled, and nothing else distinguishes that from its own bad markup.
+- **One render at a time.** Chromium spikes a couple of hundred megabytes and this box also runs
+  Postgres and the wapi stack. The promise queue in `lib/render-html.ts` is not tidiness; two
+  concurrent renders is how a WhatsApp bot causes an OOM kill somewhere else.
+- **`--single-process` crashes on a real page load.** It halves the memory and it survives
+  `setContent` with no network perfectly, so it looked correct right up until the first website
+  was captured: `Session closed` mid-screenshot, every time, on anything that navigates and runs
+  JavaScript. Serialising is what bounds the memory instead.
+- **`capture` reaches the internet, and that is why it is not `render` with a flag.** They have
+  opposite network stances and must not become one path with a boolean deciding whether the SSRF
+  guard runs. `capture` applies `assertPublic` to the page *and every subresource* — a public
+  page can pull an `<img>` from `169.254.169.254` — and then re-checks the address Chromium
+  actually reached, off `response.remoteAddress()`. That second check is the only thing that sees
+  DNS rebinding: Chromium resolves the name itself, separately, after the first check looked.
+- **A single-page app is "loaded" while its body is still empty.** DOMContentLoaded fires on
+  `<div id="root">` and nothing else, so screenshotting there returns a blank picture that looks
+  like a bug in the renderer rather than a page that had not drawn. `painted()` waits for text or
+  an image, bounded, before the scroll.
+- **`navigator.webdriver` is what gets a challenge page instead of the site.** It is true for any
+  browser driven over CDP and plenty of sites read it. Hiding it evades no login and no paywall —
+  the capture signs in nowhere — it is the difference between a picture of the site and a picture
+  of "checking your browser".
+- **The leaderboard's numbers are read as JSON; the picture is decoration.** `capture` exists,
+  the board is a good looking page, and a screenshot is one call — and as the *source* it is
+  wrong twice: it puts the model in the position of reading figures off an image, which is where
+  it is confidently wrong, and it starts Chromium on a box already running Postgres and the wapi
+  stack. So `/api/leaderboard` is the source, and a screenshot rides along on an announcement
+  with the figures as its caption — one message, not two, and a capture that fails costs the
+  picture rather than the notification. The two are not in tension as long as no figure is ever
+  taken off the image; if that ever changes, this whole feature is a guess.
+- **First place is a separate sum from the next place, and the board never publishes it.** The
+  page shows only "siguiente objetivo", so `toBeat` against the top total is the figure nobody
+  can read off it — which is exactly why it is the one worth computing. From second the two are
+  the same number, and `firstIsNext` exists so the message does not print it twice under two
+  headings, which reads as a bug even though both lines are true.
+- **The announcement is assembled as blocks, not as a filtered list of lines.** The first version
+  built one flat array and filtered the empties, which dropped the deliberate blank separators
+  along with the optional lines and ran the whole message into a wall. Nothing typechecks a
+  layout; `leaderboard-check` asserts the blocks.
+- **Ties share a position, so "the next place" is not the row above.** Eight projects on nought
+  votes are all seventeenth, and passing them costs *two* votes. The gap is measured against the
+  next **distinct** higher total, and everyone holding it has to be passed — `toBeat` is that
+  total minus ours plus one, `toTie` is one less and shares the place. An index-based
+  `list[i - 1]` gives a plausible wrong answer, which nobody in the group would question.
+  `npm run leaderboard-check` pins it with fixtures *and* against the phrase the board prints for
+  itself, so a redesign that removes that phrase fails rather than blinding the comparison.
+- **That endpoint is the site's own internal route, not a contract.** It is validated with zod and
+  a payload that no longer parses has to surface as "I could not read the board". The one thing
+  that must never happen is a plausible figure assembled out of a renamed field.
+- **The leaderboard tool takes no URL.** Which board and which project come from `config`. A tool
+  argument naming the endpoint would be the SSRF surface `lib/fetch-media.ts` exists to avoid, in
+  a feature that never needs it.
+- **`live` and `stale` are states, not failures.** A feed that is down and a row that did not
+  refresh are both "the last thing known", and reporting either as the score right now is the
+  quiet way this feature becomes wrong. Both paths say so — the announcement dates itself, the
+  tool result tells the model to.
+- **A leaderboard announcement does not go through the model, and a chime does.** The difference
+  is the content: a chime is a judgement, this is a subtraction. Routing it through `reply()`
+  would add latency, cost and the only failure that matters here — a number that is almost right.
+- **The announced snapshot moves on the send, not on the read.** Same shape as the reminder's
+  `next_at` and `last_chime_at`: if it moved when the board was read, a failed send would leave
+  the row looking announced and the one change anybody cared about is the one nobody hears.
+- **`holdReason` is a pure function of the row and the clock**, and deliberately does not ask
+  whether the deployment has a board configured — that is the page's business, and keeping it out
+  is what lets every refusal be asserted without an environment. The dashboard adds that reason
+  itself, because a row reading "ready" under a notice saying nothing is configured is a page
+  contradicting itself.
+- **Quiet hours have exactly one implementation.** `chime.quiet` is imported by the leaderboard
+  rather than written again: the midnight wrap is the one piece of arithmetic here whose bug is
+  "it messaged the group at four in the morning", and `chime-check` already asserts both
+  directions.
+- **A watch is per chat, so it is dashboard-only.** Asking how the voting is going is a tool
+  anyone in a group may reach; subscribing the room to recurring notifications is not something
+  one person should be able to do to everybody else. Same reasoning as chime-ins and rate limits.
+- **`new URL()` rewrites an IPv6 host, and it broke the SSRF guard.**
+  `http://[::ffff:169.254.169.254]/` normalises to `::ffff:a9fe:a9fe`, so a pattern matching the
+  dotted spelling passed the metadata endpoint through as public — in every feature taking a URL,
+  stickers included. `isPrivateIPv6` now expands the address into eight groups; every embedded
+  form (mapped, compatible, NAT64) has to reach the same answer, and `sticker-check` names each.
+- **GitHub is the REST API on purpose — not `gh`, not an MCP server.** Both are wrappers over
+  the same endpoints, and neither knows which repositories this bot may write to. The feature is
+  the layer in front of the call: allowlist, per-operation switch, daily ceiling. Swapping the
+  client for `gh` would move that decision nowhere useful and add a process spawn per call.
+- **A fine-grained token cannot be granted a repository its account does not own.** Not "granted
+  read-only" — absent from the picker entirely, while still reading it happily when it is public.
+  That is a bot answering questions about a repository all day and refusing to open an issue on
+  it, with a valid token, the right switches and the repository allowlisted. Everything on this
+  side was correct. `explain()` says the rule now, `statuses()` puts the verdict on the dashboard
+  before anyone tries from a chat, and `github-check` asserts that exact case.
+- **A classic token needs no write access to open an issue on a public repository.** Any account
+  may. Treating `permissions.push === false` as "cannot write" would refuse the one arrangement
+  that works for somebody else's public repository, so `verdict()` splits on visibility and scope
+  rather than on push.
+- **GitHub is the one feature that is also scoped per chat**, and it is done by deleting the key
+  from the switch set in `reply()` rather than by gating each tool. The prompt section, the tool
+  withdrawal and the self-description all read that set, so a chat it is off in never hears the
+  feature exists — the difference between "off" and "offers it, then refuses". `features` itself
+  is still global; a general per-chat table is still a rewrite, not a tweak.
+- **"Only these groups" with no groups means nowhere.** The inverse would be an integration that
+  became available everywhere the moment somebody cleared the list. `github-check` states it.
+  It is also the state somebody saves by accident, and the symptom is a bot answering "I do not
+  have access" in every chat while the dashboard shows every permission ticked — because a chat
+  it is off in is never told GitHub exists. The page now says so before it can be wondered about.
+- **A new `github_settings` column has to be added in four places**, and the compiler catches
+  only two of them: the DDL, `Settings`/`COLUMNS`/`setPermissions` in `lib/github.ts`, the
+  dashboard form, and `github-check`'s restore. That restore reads the real row and puts it back,
+  so a column missing there is silently reset to its default — `chat_mode` was, which turned
+  "only these groups" back into "everywhere" on every run of the check.
+- **Files go in as one commit, through the git data API.** The contents endpoint is one `PUT`
+  per file, which is one commit per file, a half-published site when the fourth fails, and a Pages
+  build for each. `putFiles` reads the branch head, makes a blob per file, builds a tree on
+  `base_tree` — so unnamed files survive — commits once and moves the ref. Blobs go up
+  sequentially: GitHub's own guidance is to avoid concurrent mutating requests.
+- **The sticker site commits bytes, never wapi links.** A wapi URL dies with the session that
+  uploaded it, so a gallery of those links is a gallery of broken images the day the number
+  changes. The bytes in Postgres exist for this.
+- **Choose what fits from sizes, not from pictures.** `stickers.sizes()` then `bytesFor()`. The
+  first version selected every `bytes` column to decide which 20MB of 49MB to publish, and that
+  query is heavy enough to be cancelled outright — which surfaces as a Postgres error in the
+  middle of an export, not as slowness.
+- **`reposPrivate` is a ceiling, not a default.** Reading it as both made every repository
+  private even with public allowed — the tool had no visibility argument at all — and a private
+  repository cannot have a Pages site on a free plan, so the whole publish-a-website path failed
+  one step later with a message about billing. The dashboard decides what is *possible*; the
+  request decides within that.
+- **"Your current plan does not support GitHub Pages for this repository" means "make it
+  public".** It is a 403, so the general permission branch of `explain()` swallowed it and
+  produced a paragraph about fine-grained tokens instead; the plan case has to be tested first.
+- **Making a repository public is gated by the same setting as creating public ones**, and going
+  private is not. They are not symmetrical: one publishes every commit ever made to the world
+  from a chat message, the other tidies up.
+- **`github_pages` has to be idempotent, and 409 is an answer.** "Deploy it" and "what is the
+  URL?" are the same question asked twice. It reads first, enables only when there is nothing
+  there, and requests a build otherwise — and that build request is allowed to fail, since a
+  repository built by a workflow rather than from a branch refuses that endpoint while its site
+  is perfectly fine.
+- **A Pages URL exists before the site does.** GitHub answers with `html_url` the moment Pages is
+  on; the first build takes a minute or two, so a link handed over immediately 404s. The status
+  is returned with it and the prompt tells the bot to say which it is, or the feature reads as
+  broken on its first use.
+- **The publishing branch is the repository's default, not "main".** Guessing is a 422 that reads
+  as nothing in particular, so `deployPages` looks the default branch up when none is given.
+- **Writes fail closed.** An empty `github_repos` means no repository may be written to, not
+  "any". A default of "anywhere" would be one migration away from a bot that opens issues on
+  strangers' repositories because somebody in a group asked it to.
+- **`/repos/{repo}/issues` returns pull requests too.** Three of the three newest rows on
+  `vercel/next.js` are PRs. Reporting them as issues is a wrong answer nobody would question, so
+  `toIssue` marks each one and the tool tells the model to say which is which.
+- **Only the GitHub token is sealed, and that is deliberate.** `lib/secret-box.ts` exists for one
+  credential: it can create repositories on an account, and no person ever reads it back. Notion's
+  per-chat tokens are stored as text because they are grants to whichever pages somebody shared.
+  Do not conclude from the one that this database encrypts secrets generally.
+- **`github-check` reads the real settings row and puts it back.** That row holds this
+  deployment's actual token; a check that clobbered it would silently disconnect GitHub, which is
+  worse than a failing assertion. It never performs a write against GitHub — every assertion
+  stops at the decision, because the decision is the feature.
 - **Groups only, and only when tagged.** DMs are ignored by default (`BOT_REPLY_TO_DMS`).
   Stickers are the sole exception: collected untagged, silently, never answered.
 
@@ -272,18 +509,31 @@ like a simplification opportunity.
 ```bash
 npm run smoke           # signatures, "is this for me?", what the gate covers, and whether
                         # these two files still point at things that exist
+npm run allowlist-check # the group allowlist gate: DMs bypass it, an unlisted group is refused,
+                        # an empty list blocks every group rather than none
 npm run features-check  # every tool belongs to a switch, every switch does something, and the
                         # README's figures still match the code
 npm run cron-check      # the cron evaluator, including both daylight-saving transitions
 npm run contrast-check  # resolves the landing CSS cascade and measures what is readable
+npm run github-check    # every GitHub refusal — the allowlist, each switch, the daily ceiling,
+                        # and that nothing works before an account is connected
+npm run chime-check     # chime-in restraint: the cadence, the daily cap, quiet hours across
+                        # midnight, and that claiming twice cannot double-fire
+npm run leaderboard-check # the gap to the next place, ties included, checked against the
+                        # arithmetic the board prints for itself
 npm run summary-check   # one real digest end to end: does it keep the decision, the deadline,
                         # the links, and the right picture? (costs money, needs DATABASE_URL)
 npm run transfer-check  # moves real rows between two throwaway groups, including every refusal
+npm run supporters-check # identity matching, the coffee webhook signature, and the live API
+npm run roadmap-check   # the weighting, the vote cap, that voting twice cannot double, and that
+                        # one person's several identities resolve to one supporter and one vote
 npm run wapi-check      # the vendored SDK against the real API: envelopes, both error types,
                         # and one real send into a throwaway sandbox session (needs WAPI_PAT)
 npm run sticker-check   # real ffmpeg conversion + the SSRF guard (needs ffmpeg)
 npm run voice-check     # voice notes really are Ogg/Opus mono 48kHz, per ffprobe
 npm run draw-check      # one real image generation, checks alpha survives (costs money)
+npm run render-check    # a real Chromium render: a PNG, a table that stays a table, no network
+                        # (needs a browser; set CHROMIUM_PATH outside Docker)
 npm run video-check     # video really is H.264/yuv420p/AAC in MP4, per ffprobe
 npm run models-check    # run after ANY model change: does the tier accept tools, vision,
                         # effort, verbosity and a transparent background? (costs money)

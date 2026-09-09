@@ -23,6 +23,13 @@ import * as sheets from "./sheets";
 import * as reminders from "./reminders";
 import * as features from "./features";
 import * as summaries from "./summaries";
+import * as chime from "./chime";
+import * as github from "./github";
+import * as stickerSite from "./sticker-site";
+import * as supporters from "./supporters";
+import * as roadmap from "./roadmap";
+import * as leaderboard from "./leaderboard";
+import { render as renderHtml, capture } from "./render-html";
 import { toVoiceNote, VOICE_NOTE_MIMETYPE, VOICE_NOTE_FILENAME } from "./audio";
 import { fetchDecrypted } from "./inbound-media";
 import { fetchMedia } from "./fetch-media";
@@ -70,6 +77,12 @@ export type Turn = {
   messageKey?: MessageKey;
   /** The message being replied to, when its key can be reconstructed. */
   quotedKey?: MessageKey;
+  /**
+   * Nobody addressed this turn: it is the bot deciding to speak in a group it has been reading.
+   * Changes two things and nothing else — the prompt says so, and an empty answer is allowed to
+   * stay empty rather than becoming an apology for a question that was never asked.
+   */
+  unprompted?: boolean;
 };
 
 export type Reply = {
@@ -119,11 +132,13 @@ const systemPrompt = async (turn: Turn, on: Set<string>): Promise<string> => {
    * answer that honestly: it is the one thing it does that people would reasonably object to
    * not being told about, and "am I being recorded?" deserves a true answer.
    */
-  const recorded = has("summaries") && (await summaries.recordedChats()).has(turn.chat);
+  const recordedForDigest = has("summaries") && (await summaries.recordedChats()).has(turn.chat);
+  const recordedForChime = has("chime") && (await chime.chimedChats()).has(turn.chat);
+  const recorded = recordedForDigest || recordedForChime;
   const quoted = has("quoted") ? turn.quoted : undefined;
   const source = has("stickers_make") ? stickerSource(turn) : undefined;
 
-  const [memories, stickerList, notionConnection, openTasks, doneTasks, scheduled] =
+  const [memories, stickerList, notionConnection, openTasks, doneTasks, scheduled, gh, ghRepos] =
     await Promise.all([
       has("memory") ? memory.list(turn.chat).then(memory.render) : Promise.resolve(""),
       has("stickers_send") ? stickers.list().then(stickers.render) : Promise.resolve(""),
@@ -131,6 +146,8 @@ const systemPrompt = async (turn: Turn, on: Set<string>): Promise<string> => {
       has("tasks") ? tasks.open(turn.chat) : Promise.resolve([]),
       has("tasks") ? tasks.recentlyDone(turn.chat) : Promise.resolve([]),
       has("reminders") ? reminders.forChat(turn.chat) : Promise.resolve([]),
+      has("github") ? github.settings() : Promise.resolve(null),
+      has("github") ? github.allowed() : Promise.resolve([]),
     ]);
 
   /**
@@ -166,6 +183,84 @@ const systemPrompt = async (turn: Turn, on: Set<string>): Promise<string> => {
     ...(has("stickers_send")
       ? [
           "- `send_sticker` sends one from the sticker library below, which is shared by every chat. Reach for it when a sticker answers better than words — a reaction, a joke, agreement — or when someone asks for one. Pick by what it shows, not by its id order. If nothing fits, do not force it; say something instead.",
+        ]
+      : []),
+    ...(has("roadmap")
+      ? [
+          "- `list_roadmap` shows what is being built next and what has shipped. Anyone may ask. `vote_roadmap` records a vote for the person speaking, by the number shown in that list — so show the list first. `propose_roadmap` records a suggestion. Only supporters can vote or propose, votes are weighted by how much somebody has chipped in, and a supporter may back at most three open items at once.",
+          "- Voting ranks what gets built; it never switches anything on. If somebody expects their vote to turn a feature on, say plainly that it does not.",
+        ]
+      : []),
+    ...(has("supporters")
+      ? [
+          "- `list_supporters` reads out who has chipped in towards running you. Use it when somebody asks who supports this, and read the names back plainly. It holds no amounts, so do not imply any.",
+        ]
+      : []),
+    ...(has("render")
+      ? [
+          "- `render_html` lays something out in HTML and sends it as a picture. Reach for it whenever the meaning is in the layout — a table, a comparison, a schedule, a receipt, a scoreboard — because WhatsApp shows none of that as text, and a table typed as plain text is unreadable on a phone. Also use it when somebody asks to see something as an image, or to render something you already wrote out.",
+          "- Nothing in that HTML is fetched: no external stylesheet, font or image will load. Inline everything and use ordinary system fonts. Emoji work.",
+        ]
+      : []),
+    ...(has("screenshot")
+      ? [
+          "- `screenshot_page` opens a link in a real browser and sends a picture of it. Use it when somebody wants to *see* a page rather than read about it. It signs in nowhere, so anything behind a login comes back as the login screen, and it refuses any address inside a private network.",
+        ]
+      : []),
+    ...(gh?.login
+      ? [
+          `- GitHub, as the account **${gh.login}**. \`github_repo\` looks a repository up, \`github_issues\` lists its issues, \`github_my_repos\` lists what that account has.`,
+          ...(gh.canOpenIssues || gh.canComment || gh.canCreateRepos
+            ? [
+                `- You may also ${[
+                  gh.canOpenIssues ? "open issues" : "",
+                  gh.canComment ? "comment on them" : "",
+                  gh.canCreateRepos
+                    ? `create repositories${gh.reposPrivate ? " (always private)" : ""}`
+                    : "",
+                  gh.canDeployPages ? "publish a repository as a website with GitHub Pages" : "",
+                  gh.canPushFiles ? "commit files into a repository" : "",
+                ]
+                  .filter(Boolean)
+                  .join(", ")}.${
+                  ghRepos.length
+                    ? ` Issues and comments only land on: ${ghRepos.map((r) => r.repo).join(", ")}. Anywhere else is refused, and that is a setting rather than something to work around.`
+                    : " No repository has been approved for writing to yet, so those will be refused until one is."
+                }`,
+                ...(gh.canDeployPages
+                  ? [
+                      `- **GitHub Pages needs a public repository.** It is free on public ones and a paid feature on private ones, so publishing a private repository fails with a message about billing. ${
+                        gh.canCreateRepos && !gh.reposPrivate
+                          ? "Create it public in the first place, or use `github_set_visibility` to make an existing one public before publishing."
+                          : "Public repositories are switched off here, so say plainly that a site cannot be published until somebody allows them on the dashboard."
+                      }`,
+                    ]
+                  : []),
+                ...(gh.canPushFiles && gh.canDeployPages
+                  ? [
+                      "- To put something on the web: create a repository if there is not one already, `github_put_files` the page into it as `index.html`, then `github_pages` to publish it and hand back the address. `github_publish_stickers` does that whole sequence for the sticker library on its own.",
+                    ]
+                  : []),
+                ...(gh.canPushFiles
+                  ? [
+                      "- `github_put_files` writes whole files, never patches. What you send replaces what is at that path, so do not use it to change part of a file you have not read.",
+                    ]
+                  : []),
+                "- Writing to GitHub is public and permanent, and every issue carries the name of whoever asked. Open one when somebody actually wants it filed — a bug, a request, something to remember — and not to acknowledge a passing remark. Say what you filed and link it.",
+              ]
+            : [
+                "- You can only read. Opening issues, commenting and creating repositories are all switched off here, so say so plainly rather than trying.",
+              ]),
+        ]
+      : []),
+    ...(has("github") && !gh?.login
+      ? [
+          "- GitHub is switched on but no account is connected yet, so anything to do with GitHub will fail. Say that it needs connecting on the dashboard.",
+        ]
+      : []),
+    ...(has("leaderboard")
+      ? [
+          "- `leaderboard` reads the live vote count and works out the gap to the next place. See the section on it below.",
         ]
       : []),
     ...(has("usage_report")
@@ -244,6 +339,23 @@ const systemPrompt = async (turn: Turn, on: Set<string>): Promise<string> => {
           "",
         ]
       : []),
+    ...(has("leaderboard")
+      ? [
+          "The leaderboard:",
+          leaderboard.configured()
+            ? "- `leaderboard` is the only place these figures come from. Call it every time somebody asks how the voting is going, what position we are in, or how many votes we need \u2014 never answer from an earlier turn, because the count moves every few seconds."
+            : "- No leaderboard is configured on this deployment, so there is nothing to read. Say that plainly if anyone asks about votes or positions.",
+          "- Lead with the gap: how many votes to take the next place, and from whom. That is what anyone asking actually wants; the full table is noise on a phone.",
+          "- The tool has done the arithmetic. Read its numbers back as they are \u2014 do not add, subtract or round them, and never give a figure it did not give you.",
+          "- If it says the figures are not current, say so in the same breath as the numbers.",
+          ...(has("screenshot")
+            ? [
+                "- If somebody wants to *see* the board rather than hear the numbers, `leaderboard` gives you its address and `screenshot_page` takes the picture. The figures still come from `leaderboard`; never read one off an image.",
+              ]
+            : []),
+          "",
+        ]
+      : []),
     ...(has("reminders")
       ? [
           "Reminders:",
@@ -276,7 +388,27 @@ const systemPrompt = async (turn: Turn, on: Set<string>): Promise<string> => {
       : []),
     ...(recorded
       ? [
-          "Everything said in this chat is being recorded so that a scheduled summary can be written from it later, and posted into another group. If anyone asks whether you are recording, logging, reading or summarising this chat, say plainly that you are and what it is for. Never deny it. Do not bring it up unprompted.",
+          `Everything said in this chat is being recorded, ${
+            recordedForDigest && recordedForChime
+              ? "both so a scheduled summary can be written from it later and posted into another group, and so you can follow along and occasionally say something without being tagged"
+              : recordedForDigest
+                ? "so that a scheduled summary can be written from it later, and posted into another group"
+                : "so you can follow along and occasionally say something in here without being tagged"
+          }. If anyone asks whether you are recording, logging, reading or summarising this chat, say plainly that you are and what it is for. Never deny it. Do not bring it up unprompted.`,
+          "",
+        ]
+      : []),
+    ...(turn.unprompted
+      ? [
+          "*Nobody has asked you anything.* You have been reading this group and are deciding whether to say something, the way a person in the room would.",
+          "",
+          "- Silence is the normal answer. Most of what people say does not need a reply from you, and a bot that comments on everything is the thing everyone mutes. If nothing you could add is worth the notification, answer with nothing at all.",
+          "- Speak when you would actually add something: an answer to a question nobody picked up, a fact you happen to know, something you were asked to remember and this is the moment for, a genuine joke that lands. Not a summary of what they just said, not a cheerful observation that they are chatting, and never a question asked only to keep talking.",
+          "- Be short. One or two lines. You are joining a conversation, not opening one.",
+          "- Write the message itself. No preamble, no framing, no explaining why you are speaking.",
+          "- Do not greet the room, do not announce yourself, and do not ask if anyone needs help.",
+          "- Answer in the language they are speaking.",
+          "- A sticker on its own is often the right move, and better than a sentence about how funny something is.",
           "",
         ]
       : []),
@@ -1048,11 +1180,499 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
     },
   }),
 
+  render_html: tool({
+    description:
+      "Lay something out in HTML and send it to the chat as a picture. Use it when the answer is a table, a card, a comparison, a receipt, a schedule — anything whose meaning is in its layout, which WhatsApp cannot show as text. Also use it when somebody asks to *see* something you have just written out, or asks for it as an image.",
+    inputSchema: z.object({
+      html: z
+        .string()
+        .describe(
+          "A fragment, not a whole document — no <html>, <head> or <body>, and no <script>. Style it with a `style` attribute or one inline <style> block. Nothing is fetched: no external stylesheet, font, or image URL will load, so inline anything you need and use ordinary system fonts. Tables, flexbox, grid and emoji all work.",
+        ),
+      width: z
+        .number()
+        .int()
+        .optional()
+        .describe("Pixels wide, 320 to 1200. Leave it out for 720, which suits a phone."),
+      caption: z.string().optional().describe("One short line to send with it, if it needs one."),
+    }),
+    execute: async ({ html, width, caption }) => {
+      try {
+        const { png, height, blocked } = await renderHtml(html, width ?? 720);
+
+        const url = await wapi.upload({
+          base64: png.toString("base64"),
+          mimetype: "image/png",
+          fileName: "render.png",
+        });
+        await wapi.send({
+          to: turn.chat,
+          imageUrl: url,
+          ...(caption ? { text: caption } : {}),
+        });
+
+        sent.push("an image");
+        /*
+         * Blocked resources are reported, not hidden. A page whose stylesheet never loaded still
+         * renders — unstyled — and the model would otherwise have no way to tell that from its
+         * own markup being wrong.
+         */
+        const missed = blocked.length
+          ? ` It could not fetch ${blocked.length === 1 ? "this" : "these"}, so ${blocked.length === 1 ? "it is" : "they are"} missing from the picture: ${blocked.join(", ")}. Nothing external is ever fetched — inline it and render again if it mattered.`
+          : "";
+        return `Sent it, ${width ?? 720}x${height}. Do not describe what is in the picture — they can see it.${missed}`;
+      } catch (err) {
+        // Returned, not thrown: the model can simplify the markup and try once more.
+        const why = err instanceof Error ? err.message : String(err);
+        console.error("[render] failed:", why);
+        return `Could not render that: ${why}. If it referenced anything by URL, that is why — nothing is fetched. Try again with everything inline.`;
+      }
+    },
+  }),
+
+  github_repo: tool({
+    description:
+      "Look up a repository on GitHub: what it is, its language, stars, open issue count, when it was last pushed. Takes owner/name, or a github.com link.",
+    inputSchema: z.object({
+      repo: z.string().describe('Like "crafter-station/wapi", or the URL of the repository.'),
+    }),
+    execute: async ({ repo }) => {
+      try {
+        const r = await github.repo(repo);
+        return JSON.stringify(r);
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+  }),
+
+  github_issues: tool({
+    description:
+      "List issues on a repository. Pull requests are marked as such in the result — do not report them as issues.",
+    inputSchema: z.object({
+      repo: z.string().describe('Like "Jibaru/wspbot".'),
+      state: z.enum(["open", "closed", "all"]).optional().describe("Open by default."),
+      limit: z.number().int().optional().describe("Up to 50. Ten or so reads well in a chat."),
+    }),
+    execute: async ({ repo, state, limit }) => {
+      try {
+        const found = await github.issues(repo, {
+          ...(state ? { state } : {}),
+          ...(limit ? { limit } : {}),
+        });
+        if (found.length === 0) return `No ${state ?? "open"} issues on ${repo}.`;
+        return JSON.stringify(found.map(({ body, ...rest }) => rest));
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+  }),
+
+  github_my_repos: tool({
+    description:
+      "List the repositories your own GitHub account can see, most recently pushed first. Use it when somebody asks what you have, or what you have been working on.",
+    inputSchema: z.object({
+      limit: z.number().int().optional().describe("Up to 100; twenty is plenty for a chat."),
+    }),
+    execute: async ({ limit }) => {
+      try {
+        const repos = await github.mine(limit ?? 20);
+        if (repos.length === 0) return "That account has no repositories yet.";
+        return JSON.stringify(
+          repos.map((r) => ({
+            name: r.fullName,
+            private: r.private,
+            description: r.description,
+            language: r.language,
+            stars: r.stars,
+            pushed: r.pushedAt,
+          })),
+        );
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+  }),
+
+  github_open_issue: tool({
+    description:
+      "Open an issue on a repository. Only works on repositories this deployment has been told it may write to, and it is refused otherwise — that refusal is a setting, not a mistake to work around. Write the issue properly: a title somebody could scan, and a body with what was asked, by whom, and anything they said that a maintainer would need.",
+    inputSchema: z.object({
+      repo: z.string().describe('Like "Jibaru/wspbot".'),
+      title: z.string().describe("One line. Specific — not 'bug' or 'idea'."),
+      body: z.string().optional().describe("Markdown. Say what is being asked and why."),
+      labels: z.array(z.string()).optional().describe("Only labels that already exist there."),
+    }),
+    execute: async ({ repo, title, body, labels }) => {
+      try {
+        const result = await github.openIssue(
+          repo,
+          { title, ...(body ? { body } : {}), ...(labels ? { labels } : {}) },
+          { chat: turn.chat, who: turn.senderName },
+        );
+        return result.ok
+          ? `Opened ${repo}#${result.number}: ${result.url}. Give them that link.`
+          : `Not opened — ${result.why}.`;
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+  }),
+
+  github_comment: tool({
+    description:
+      "Add a comment to an existing issue or pull request. Same permission rules as opening one.",
+    inputSchema: z.object({
+      repo: z.string(),
+      number: z.number().int().describe("The issue or PR number."),
+      text: z.string().describe("Markdown."),
+    }),
+    execute: async ({ repo, number, text }) => {
+      try {
+        const result = await github.comment(repo, number, text, {
+          chat: turn.chat,
+          who: turn.senderName,
+        });
+        return result.ok ? `Commented: ${result.url}` : `Not commented — ${result.why}.`;
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+  }),
+
+  github_create_repo: tool({
+    description:
+      "Create a new repository under your own GitHub account. Whether a public one is allowed at all is a setting here — if it is not, you get a private repository whatever you ask for, so say what was actually made rather than what was requested.",
+    inputSchema: z.object({
+      name: z.string().describe("Letters, digits, dots, dashes and underscores."),
+      description: z.string().optional(),
+      visibility: z
+        .enum(["public", "private"])
+        .describe(
+          "Choose deliberately. A repository that will be published as a website has to be public — GitHub Pages is free on public repositories and needs a paid plan on private ones. Anything holding somebody's own work or data should be private.",
+        ),
+    }),
+    execute: async ({ name, description, visibility }) => {
+      try {
+        const result = await github.createRepo(
+          {
+            name,
+            ...(description ? { description } : {}),
+            private: visibility === "private",
+          },
+          { chat: turn.chat, who: turn.senderName },
+        );
+        return result.ok
+          ? `Created it: ${result.url}. It is initialised with a README, and I may now open issues on it.`
+          : `Not created — ${result.why}.`;
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+  }),
+
+  github_set_visibility: tool({
+    description:
+      "Make an existing repository public, or private again. Making one public is refused unless this deployment allows public repositories — that is a setting somebody took in advance, not something to work around. Use it when a repository has to be published as a website, since GitHub Pages needs a public repository on a free plan.",
+    inputSchema: z.object({
+      repo: z.string().describe('Like "kekito-crafter/my-site".'),
+      visibility: z.enum(["public", "private"]),
+    }),
+    execute: async ({ repo, visibility }) => {
+      try {
+        const result = await github.setVisibility(repo, visibility === "public", {
+          chat: turn.chat,
+          who: turn.senderName,
+        });
+        return result.ok
+          ? `${repo} is now ${visibility}: ${result.url}`
+          : `Not changed — ${result.why}.`;
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+  }),
+
+  github_pages: tool({
+    description:
+      "Publish a repository as a website with GitHub Pages, and give back its public address. Asking for a repository that is already published returns the same address and requests a fresh build, so it is also the way to answer 'what is the URL?' or 'rebuild it'.",
+    inputSchema: z.object({
+      repo: z.string().describe('Like "kekito-crafter/my-site".'),
+      branch: z
+        .string()
+        .optional()
+        .describe("Which branch to publish. Leave it out to use the repository's default."),
+      path: z
+        .enum(["/", "/docs"])
+        .optional()
+        .describe("The folder within that branch. GitHub allows only the root or /docs."),
+    }),
+    execute: async ({ repo, branch, path }) => {
+      try {
+        const result = await github.deployPages(
+          repo,
+          { ...(branch ? { branch } : {}), ...(path ? { path } : {}) },
+          { chat: turn.chat, who: turn.senderName },
+        );
+        if (!result.ok) return `Not published — ${result.why}.`;
+
+        const { url, status, created } = result.site;
+        /*
+         * The address exists before the site does: GitHub returns it the moment Pages is switched
+         * on, and the first build takes a minute or two. Saying so is the difference between a
+         * link that works and a link somebody opens straight away and finds empty.
+         */
+        const settling =
+          status === "built"
+            ? ""
+            : " It is building — the address usually starts working within a minute or two, and shows a 404 until it does.";
+        return `${created ? "Published" : "Already published"}: ${url}${settling} Give them that address.`;
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+  }),
+
+  github_put_files: tool({
+    description:
+      "Write text files into a repository as a single commit — an index.html for a site, a README, a data file, anything you can write out. Existing files at those paths are replaced; everything else in the repository is left alone. Combine it with github_pages to publish a page you have written.",
+    inputSchema: z.object({
+      repo: z.string().describe('Like "kekito-crafter/my-site".'),
+      files: z
+        .array(
+          z.object({
+            path: z
+              .string()
+              .describe('Repository-relative, no leading slash. "index.html", "docs/notes.md".'),
+            content: z
+              .string()
+              .describe("The whole file, not a patch — what is here replaces what is there."),
+          }),
+        )
+        .min(1)
+        .describe("Everything that belongs in one commit. Files that make sense together go together."),
+      message: z.string().describe("The commit message. Say what changed and why."),
+      branch: z.string().optional().describe("Defaults to the repository's default branch."),
+    }),
+    execute: async ({ repo, files, message, branch }) => {
+      try {
+        const result = await github.putFiles(
+          repo,
+          files,
+          message,
+          { ...(branch ? { branch } : {}) },
+          { chat: turn.chat, who: turn.senderName },
+        );
+        return result.ok
+          ? `Committed ${result.files} file${result.files === 1 ? "" : "s"} to ${repo} on ${result.branch} (${result.commit}): ${result.url}`
+          : `Not committed — ${result.why}.`;
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+  }),
+
+  github_publish_stickers: tool({
+    description:
+      "Put the whole sticker library on the web: builds a gallery page, commits every sticker into a repository, switches GitHub Pages on and gives back the address. Use it when somebody asks to see the stickers as a website or to share them outside WhatsApp. Repeat it later to refresh the page with whatever has been collected since.",
+    inputSchema: z.object({
+      repo: z
+        .string()
+        .describe(
+          "Where to publish it, as owner/name. It must already exist — create it first if it does not — and be one you are allowed to write to.",
+        ),
+      title: z
+        .string()
+        .optional()
+        .describe("The heading on the page. Defaults to 'Sticker library'."),
+    }),
+    execute: async ({ repo, title }) => {
+      try {
+        const built = await stickerSite.build({ ...(title ? { title } : {}) });
+        if (built.count === 0) {
+          return "There are no stickers with stored pictures to publish yet.";
+        }
+
+        const committed = await github.putFiles(
+          repo,
+          built.files,
+          `Publish ${built.count} sticker${built.count === 1 ? "" : "s"}`,
+          {},
+          { chat: turn.chat, who: turn.senderName },
+        );
+        if (!committed.ok) return `Not published — ${committed.why}.`;
+
+        const published = await github.deployPages(
+          repo,
+          {},
+          { chat: turn.chat, who: turn.senderName },
+        );
+        if (!published.ok) {
+          return `The stickers are committed to ${repo}, but publishing the site was refused — ${published.why}. The files are there either way.`;
+        }
+
+        const missing = [
+          built.left
+            ? `The newest ${built.count} are on it; ${built.left} more would have made the commit too big.`
+            : "",
+          built.skipped ? `${built.skipped} had no stored picture.` : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const settling =
+          published.site.status === "built"
+            ? ""
+            : " It is building — give it a minute or two before opening it.";
+        return `Published ${built.count} stickers: ${published.site.url}${settling} ${missing} Give them that address.`.replace(
+          /\s+/g,
+          " ",
+        );
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+  }),
+
+  screenshot_page: tool({
+    description:
+      "Open a web page in a real browser and send a picture of it to the chat. For when somebody links something and wants to see it, or asks what a site looks like. It cannot sign in anywhere, so a page behind a login comes back as the login screen.",
+    inputSchema: z.object({
+      url: z.string().describe("The page to open. Must be a public http(s) address."),
+      fullPage: z
+        .boolean()
+        .optional()
+        .describe(
+          "True for the entire page top to bottom, which on a long site is a tall strip. Leave it out for what fits on screen, which is usually what people mean.",
+        ),
+      caption: z.string().optional().describe("One short line to send with it, if it needs one."),
+    }),
+    execute: async ({ url, fullPage, caption }) => {
+      try {
+        const shot = await capture(url, fullPage ?? false);
+
+        const hosted = await wapi.upload({
+          base64: shot.png.toString("base64"),
+          mimetype: "image/png",
+          fileName: "page.png",
+        });
+        await wapi.send({
+          to: turn.chat,
+          imageUrl: hosted,
+          ...(caption ? { text: caption } : {}),
+        });
+
+        sent.push("an image");
+        return `Sent a picture of ${shot.url}${shot.title ? ` — "${shot.title}"` : ""}. Do not describe what is in it; they can see it.`;
+      } catch (err) {
+        const why = err instanceof Error ? err.message : String(err);
+        console.error("[capture] failed:", why);
+        return `Could not take that picture: ${why}`;
+      }
+    },
+  }),
+
+  list_roadmap: tool({
+    description:
+      "Show what is being built next, ranked by how much support each item has, plus what has already shipped. Anyone may ask — it is not restricted to supporters. Read the numbered list back as it is given; those numbers are what someone refers to when they vote.",
+    inputSchema: z.object({}),
+    execute: async () => roadmap.render(await roadmap.list()).text,
+  }),
+
+  vote_roadmap: tool({
+    description:
+      "Back an item on the roadmap on behalf of the person speaking. Take the number from the list you just showed them — call `list_roadmap` first if you have not. Only supporters can vote and their vote is weighted by how much they have chipped in; anyone else gets a plain explanation back, which you should relay without pestering them about it.",
+    inputSchema: z.object({
+      number: z
+        .number()
+        .int()
+        .describe("The number shown beside the item in the roadmap list, not a database id."),
+    }),
+    execute: async ({ number }) => {
+      if (!turn.userId) return "I cannot tell who is speaking, so I cannot record a vote.";
+
+      /*
+       * Numbering is regenerated here rather than remembered between turns: the list can change
+       * between showing it and voting, and a stale number would quietly back the wrong thing.
+       */
+      const { numbering } = roadmap.render(await roadmap.list());
+      const itemId = numbering.get(number);
+      if (itemId === undefined) {
+        return `There is no item ${number} on the list. Show the roadmap again and use one of those numbers.`;
+      }
+
+      const outcome = await roadmap.vote(turn.userId, itemId);
+      if (!outcome.ok) {
+        const holding = outcome.holding?.length
+          ? ` They are currently backing: ${outcome.holding.map((h) => h.title).join(", ")}.`
+          : "";
+        return `Not recorded — ${outcome.why}.${holding}`;
+      }
+      return `Recorded. "${outcome.item.title}" now has ${outcome.item.weight} point${outcome.item.weight === 1 ? "" : "s"} from ${outcome.item.backers} supporter${outcome.item.backers === 1 ? "" : "s"}. Their vote counted as ${outcome.weight}.`;
+    },
+  }),
+
+  propose_roadmap: tool({
+    description:
+      "Suggest something new for the roadmap on behalf of the person speaking. Only supporters may propose. A suggestion is not votable straight away — it waits for Jibaru to approve it — so say that plainly rather than implying it is now on the list.",
+    inputSchema: z.object({
+      title: z.string().describe("One line, in their words, naming the thing they want."),
+      detail: z
+        .string()
+        .optional()
+        .describe("Anything else they said about why or how, if it adds something."),
+    }),
+    execute: async ({ title, detail }) => {
+      if (!turn.userId) return "I cannot tell who is speaking, so I cannot record a suggestion.";
+
+      const supporter = await supporters.byHandle(turn.userId);
+      if (!supporter) {
+        return "Only supporters can put things on the roadmap. Say so plainly, and mention they can chip in if they want to — once, without pressing it.";
+      }
+
+      await roadmap.add({
+        title,
+        ...(detail ? { detail } : {}),
+        state: "proposed",
+        proposedBy: supporter.handles[0] ?? null,
+      });
+      return `Noted "${title}" as a suggestion. It is waiting for Jibaru to approve it before anyone can vote on it.`;
+    },
+  }),
+
+  list_supporters: tool({
+    description:
+      "List the people who have chipped in towards running this bot. Use it when someone asks who supports it, who paid for it, or who is behind it. Names and how they helped only — there are no amounts to report and you must not invent any.",
+    inputSchema: z.object({}),
+    execute: async () => supporters.render(await supporters.list()),
+  }),
+
   check_usage: tool({
     description:
       "Report how much you have cost: tokens used today, over the last week, and in total, with an estimated spend. Use it when someone asks about usage, tokens, cost or spending.",
     inputSchema: z.object({}),
     execute: async () => usage.report(),
+  }),
+
+  leaderboard: tool({
+    description:
+      "Read the live public vote count and work out where we stand: the position, the votes, and exactly how many more are needed to take the next place. Use it whenever someone asks how the voting is going, what position we are in, or how far off the next place we are \u2014 the count changes constantly, so call it again rather than reusing an earlier answer. It takes no arguments: which board and which project are fixed by this deployment.",
+    inputSchema: z.object({}),
+    execute: async () => {
+      const cfg = config.leaderboard();
+      if (!cfg) return "No leaderboard is configured on this deployment, so there is nothing to read.";
+      try {
+        const reading = await leaderboard.read();
+        const standing = leaderboard.standing(reading.projects, cfg.slug);
+        if (!standing) {
+          return `The board was read (${reading.projects.length} projects) but "${cfg.slug}" is not on it. Say that rather than guessing at a position.`;
+        }
+        return leaderboard.summary(standing, reading);
+      } catch (err) {
+        const why = err instanceof Error ? err.message : String(err);
+        console.error("[leaderboard] read failed:", why);
+        return `Could not read the leaderboard: ${why}. Say that you could not check right now \u2014 do not give a position from memory.`;
+      }
+    },
   }),
 
   name_sticker: tool({
@@ -1191,6 +1811,8 @@ const buildUserContent = async (
   turn: Turn,
   on: Set<string>,
 ): Promise<UserContent> => {
+  // Nobody is speaking in an unprompted turn; the text is a note to the bot, not a message.
+  if (turn.unprompted) return turn.text;
   // In a group, who is speaking changes the answer, so it has to be in the message itself.
   const said = turn.isGroup ? `${turn.senderName}: ${turn.text}` : turn.text;
   // With "follows what you point at" off, a reply is just its own words.
@@ -1242,6 +1864,14 @@ export const reply = async (turn: Turn): Promise<Reply> => {
    * (or Exa, when `EXA_API_KEY` is set) behind a normal function tool, so the restriction never
    * applies here. The database switch is read as-is.
    */
+  /*
+   * GitHub is the one feature that is also scoped per chat. Removing the key here rather than
+   * gating each tool means the prompt section, the tool withdrawal and what the bot says about
+   * itself all follow from the same set — a chat it is switched off in does not hear about it,
+   * which is the difference between "off" and "refuses when asked".
+   */
+  if (on.has("github") && !(await github.availableIn(turn.chat))) on.delete("github");
+
   const content = await buildUserContent(turn, on);
   const history = await loadHistory(turn.chat);
   const sent: string[] = [];
@@ -1271,7 +1901,11 @@ export const reply = async (turn: Turn): Promise<Reply> => {
    * be both wrong and confusing.
    */
   const answer =
-    text || (sent.length > 0 ? "" : "Sorry, I got tangled up. Try asking me again?");
+    text ||
+    (sent.length > 0 || turn.unprompted
+      ? // Nobody asked, so there is nothing to apologise for. Silence is a valid chime.
+        ""
+      : "Sorry, I got tangled up. Try asking me again?");
 
   /**
    * History records what happened, not just what was said, so "send that again" has a referent.
