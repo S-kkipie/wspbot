@@ -27,24 +27,43 @@ type AnyUsage = {
   inputTokenDetails?: { cacheReadTokens?: number | undefined } | undefined;
 };
 
-/** USD per million tokens. Published rates as of 2026-07-30; override with env if they move. */
-const RATES: Record<string, { input: number; output: number }> = {
+/**
+ * USD per million tokens. Gemini rates per ai.google.dev/gemini-api/docs/pricing (2026-09) —
+ * note the 3.x-flash promo runs through 2026-12-31 and roughly doubles after. OpenAI rates as
+ * before. Override with env if they move.
+ */
+const RATES: Record<string, { input: number; output: number; cached?: number }> = {
   "gpt-5.6-sol": { input: 5.0, output: 30.0 },
   "gpt-5.6-terra": { input: 2.0, output: 12.0 },
   "gpt-5.6-luna": { input: 0.2, output: 1.2 },
+  "gemini-3.8-flash": { input: 0.75, output: 3.75, cached: 0.075 },
+  "gemini-3.7-flash": { input: 0.75, output: 3.75, cached: 0.075 },
+  "gemini-3.6-flash": { input: 0.75, output: 3.75, cached: 0.075 },
+  "gemini-3.5-flash": { input: 1.5, output: 9.0, cached: 0.15 },
+  "gemini-3.5-flash-lite": { input: 0.3, output: 2.5, cached: 0.03 },
+  "gemini-3.1-flash-lite": { input: 0.25, output: 1.5, cached: 0.025 },
+  "gemini-2.5-flash": { input: 0.3, output: 2.5, cached: 0.03 },
+  "gemini-2.5-flash-lite": { input: 0.1, output: 0.4, cached: 0.01 },
+};
+
+/** USD per generated image, for models billed per image rather than per token. */
+const IMAGE_RATES: Record<string, number> = {
+  "gemini-2.5-flash-image": 0.039,
 };
 
 /**
- * A model id not in the table is left unpriced rather than guessed at. `gpt-5.6` on its own is
- * an alias whose tier is not published, which is exactly the case where a guess would mislead:
- * set OPENAI_PRICE_INPUT and OPENAI_PRICE_OUTPUT (USD per million tokens) to price it.
+ * A model id not in the table is left unpriced rather than guessed at. Set BOT_PRICE_INPUT and
+ * BOT_PRICE_OUTPUT (USD per million tokens; the older OPENAI_PRICE_* names still work) to price
+ * a model that has no built-in rate.
  */
-const rateFor = (model: string): { input: number; output: number } | null => {
-  const envIn = Number(process.env["OPENAI_PRICE_INPUT"]);
-  const envOut = Number(process.env["OPENAI_PRICE_OUTPUT"]);
+const rateFor = (model: string): { input: number; output: number; cached?: number } | null => {
+  const envIn = Number(process.env["BOT_PRICE_INPUT"] ?? process.env["OPENAI_PRICE_INPUT"]);
+  const envOut = Number(process.env["BOT_PRICE_OUTPUT"] ?? process.env["OPENAI_PRICE_OUTPUT"]);
   if (envIn > 0 && envOut > 0) return { input: envIn, output: envOut };
   return RATES[model] ?? null;
 };
+
+const imageRateFor = (model: string): number | null => IMAGE_RATES[model] ?? null;
 
 /**
  * Never let accounting break a reply. A failed insert costs a row in a report; a thrown error
@@ -135,6 +154,9 @@ const totalsSince = async (interval: string): Promise<Totals> => {
 
     if (row.kind === "image") {
       totals.images += calls;
+      const imgRate = imageRateFor(row.model);
+      if (!imgRate && calls > 0) priced = false;
+      if (imgRate && totals.estimatedUsd !== null) totals.estimatedUsd += calls * imgRate;
       continue;
     }
     if (row.kind === "speech") {
@@ -144,14 +166,21 @@ const totalsSince = async (interval: string): Promise<Totals> => {
 
     const input = Number(row.input_tokens ?? 0);
     const output = Number(row.output_tokens ?? 0);
+    const cached = Number(row.cached_tokens ?? 0);
     totals.inputTokens += input;
     totals.outputTokens += output;
-    totals.cachedTokens += Number(row.cached_tokens ?? 0);
+    totals.cachedTokens += cached;
 
     const rate = rateFor(row.model);
     if (!rate && input + output > 0) priced = false;
     if (rate && totals.estimatedUsd !== null) {
-      totals.estimatedUsd += (input / 1e6) * rate.input + (output / 1e6) * rate.output;
+      // Cached input is a subset of input, billed at the cheaper cache rate (falls back to the
+      // input rate when a model publishes no separate cache price).
+      const nonCached = Math.max(0, input - cached);
+      totals.estimatedUsd +=
+        (nonCached / 1e6) * rate.input +
+        (cached / 1e6) * (rate.cached ?? rate.input) +
+        (output / 1e6) * rate.output;
     }
   }
 
@@ -174,7 +203,7 @@ export const summary = async (): Promise<{
 
 const money = (usd: number | null): string =>
   usd === null
-    ? "cost unknown for this model — set OPENAI_PRICE_INPUT and OPENAI_PRICE_OUTPUT to price it"
+    ? "cost unknown for this model — set BOT_PRICE_INPUT and BOT_PRICE_OUTPUT to price it"
     : usd < 0.01
       ? "under $0.01"
       : `about $${usd.toFixed(2)}`;
@@ -200,7 +229,7 @@ export const report = async (): Promise<string> => {
       ? `Voice notes: ${thousands(allTime.characters)} characters spoken, billed separately.`
       : "",
     allTime.images > 0
-      ? `Stickers drawn: ${allTime.images}, billed per image and not included above.`
+      ? `Stickers drawn: ${allTime.images}, billed per image (folded into the estimate).`
       : "",
   ]
     .filter(Boolean)
