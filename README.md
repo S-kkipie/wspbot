@@ -35,10 +35,10 @@ bot   → Done.
 |  |  |
 | --- | --- |
 | **What it is** | One Next.js container: a webhook that answers WhatsApp, and a dashboard that decides what it may do |
-| **Abilities** | 25 switchable features over 49 model tools, plus 3 that are always on |
-| **Storage** | Postgres, 26 tables — memory, history, stickers, schedules, supporters, roadmap, spend |
+| **Abilities** | 26 switchable features over 56 model tools, plus 3 that are always on |
+| **Storage** | Postgres, 27 tables — memory, history, stickers, schedules, supporters, roadmap, spend, games |
 | **Runs on** | A Dokploy VPS behind Traefik, alongside the WhatsApp gateway it talks to |
-| **Guarded by** | 21 check scripts that exercise the real thing rather than asserting about it |
+| **Guarded by** | 22 check scripts that exercise the real thing rather than asserting about it |
 
 ## Contents
 
@@ -48,7 +48,7 @@ bot   → Done.
 
 **Use it** — [The landing page](#the-landing-page) · [The dashboard](#the-dashboard) · [Signing in](#signing-in) · [When it replies](#when-it-replies)
 
-**What it can do** — [GitHub](#github) · [Chiming in](#chiming-in) · [The weekly recap](#the-weekly-recap) · [Put things in the chat](#what-it-can-put-in-the-chat) · [Stickers](#stickers) · [Rendering HTML](#rendering-html) · [Screenshots](#a-picture-of-a-real-page) · [Memory](#memory) · [The checklist](#the-checklist) · [Reactions](#reactions) · [Scheduled reminders](#scheduled-reminders) · [Scheduled summaries](#scheduled-summaries) · [Notion](#notion) · [Google Sheets](#google-sheets) · [Knows what it is](#what-it-knows-about-itself)
+**What it can do** — [GitHub](#github) · [Chiming in](#chiming-in) · [The weekly recap](#the-weekly-recap) · [Games](#games) · [Put things in the chat](#what-it-can-put-in-the-chat) · [Stickers](#stickers) · [Rendering HTML](#rendering-html) · [Screenshots](#a-picture-of-a-real-page) · [Memory](#memory) · [The checklist](#the-checklist) · [Reactions](#reactions) · [Scheduled reminders](#scheduled-reminders) · [Scheduled summaries](#scheduled-summaries) · [Notion](#notion) · [Google Sheets](#google-sheets) · [Knows what it is](#what-it-knows-about-itself)
 
 **Keep it honest** — [Rate limiting](#rate-limiting) · [Usage and cost](#usage-and-cost) · [Moving context between groups](#moving-context-between-groups)
 
@@ -83,13 +83,13 @@ flowchart LR
         REC["recorder<br/>untagged, recorded groups only"]
         AGENT["agent<br/>system prompt + 48 tools"]
         TIMERS["timers<br/>session 2m · reminders 30s · digests 1m · chime-ins 1m · recaps 1m"]
-        FEAT["features<br/>25 switches own every tool<br/>read from Postgres every turn"]
+        FEAT["features<br/>26 switches own every tool<br/>read from Postgres every turn"]
         FF["ffmpeg · Chromium<br/>stickers · voice · video · rendering"]
         PROXY["proxy.ts<br/>gates every page but the root"]
         PAGES["landing · /dashboard"]
     end
 
-    PG[("Postgres<br/>26 tables")]
+    PG[("Postgres<br/>27 tables")]
 
     WA -->|"every message"| SESSION
     SESSION -->|"signed webhook"| HOOK
@@ -934,6 +934,39 @@ npm run recap-check     # the Sunday claim, grouping by identity not by JID, and
                         # reaching backward rather than into the week just covered
 ```
 
+## Games
+
+Four of them, all kept in one `games` table (chat, type, whether it is still going, and a blob of
+state specific to that type), and all built on the same rule: **the secret never lives in the
+model's memory.** A model call carries no state between turns, so whoever invented a hangman word
+or a riddle answer this turn will have forgotten it by the next one. Every guess is checked in
+code, against the database row, never by asking the model whether it thinks a guess is right.
+
+- **¿Quién dijo esto?** pulls one real line from this group's own recorded history — never
+  invented, never from another chat, never the bot's own words (those never reach the log in the
+  first place) — hides who said it, and lets the group guess. It skips single-word lines and
+  prefers something older than the last couple of hours, so it is not just re-reading a message
+  from a minute ago. It only works in a chat already being recorded for `summaries` or `chime`;
+  elsewhere it says so rather than inventing a quote.
+- **Palabra/reto del día** is a word-of-the-day or a short daily challenge, written by the model.
+  It can be started on request, and it also drops automatically once a day — piggybacking on
+  `chime_settings` exactly the way the weekly recap does, and for the same reason: a group that
+  already agreed to unprompted messages has already answered the only consent question a daily
+  drop would ask again.
+- **Ahorcado** (hangman) and **adivinanzas** (riddles) are classic guessing rounds. The model
+  invents the secret word or the riddle as it starts one; from then on every guess — a letter, a
+  whole word, an answer — is checked against the row in Postgres, which is also what lets a
+  restart mid-game lose nothing.
+
+Only one game of each type runs per chat at a time; starting a new one quietly closes whichever
+was running.
+
+```bash
+npm run games-check     # the secret never comes from the model, one active game per chat per
+                        # type — including the database's own unique index — ¿quién dijo esto?
+                        # reading only this chat's own log, and the daily claim
+```
+
 ## Following a vote
 
 A hackathon leaderboard is a page somebody reloads forty times a day. The bot follows it instead,
@@ -1212,6 +1245,8 @@ npm run github-check    # every GitHub refusal, and one real read (needs DATABAS
 npm run chime-check     # chime-in restraint: cadence, daily cap, quiet hours, double-claim
 npm run recap-check     # the weekly recap: the Sunday claim, activity grouped by identity, and
                         # "on this day" reaching backward, not into the week just covered
+npm run games-check     # group games: the secret never comes from the model, one active game per
+                        # chat per type, and the daily word/challenge claim
 npm run leaderboard-check # the gap arithmetic, ties included, against the board's own answer
 npm run render-check    # a real Chromium render, and a real page captured: a PNG, a table that
                         # stays a table, and every private address refused

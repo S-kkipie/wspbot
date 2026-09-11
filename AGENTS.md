@@ -63,6 +63,8 @@ lib/summaries.ts                 scheduled digests: schedules, the log, the tran
 lib/summary-recorder.ts          writing down a recorded group; lib/summary-runner.ts fires it
 lib/recap.ts                     the weekly recap: stats, "on this day", the notable-moment archive
 lib/recap-runner.ts              fires it Sunday 20:00, for every chime-enabled group
+lib/games.ts                     ¿quién dijo esto?, palabra/reto del día, ahorcado, adivinanzas
+lib/games-runner.ts              fires the daily word/challenge drop, for every chime-enabled group
 lib/cron.ts                      five-field cron, evaluated as "does this minute match?"
 lib/usage.ts                     token accounting, cost estimate
 ```
@@ -484,6 +486,21 @@ like a simplification opportunity.
   stops at the decision, because the decision is the feature.
 - **Groups only, and only when tagged.** DMs are ignored by default (`BOT_REPLY_TO_DMS`).
   Stickers are the sole exception: collected untagged, silently, never answered.
+- **A game's secret never lives in the model's memory, only in the `games` row.** Whoever invents
+  a hangman word or a riddle answer forgets it the instant that turn ends — a model call carries
+  no state between turns — so every `guess_game` call reads the database rather than asking the
+  model to judge its own earlier answer. Checking a guess by asking the model "was this right?"
+  would work in a demo and fail the moment two turns are involved, which is every real game.
+- **¿Quién dijo esto? only has anything to draw from where a log already exists.** It reads
+  `logged_messages`, the same table `summaries` and `chime` populate, and starts nothing new —
+  a chat that is not already being recorded gets a plain explanation, never an invented line.
+  Adding a third recording reason just for this game was the alternative; skipped, because the
+  game is genuinely optional where there is no log, and a third reason means touching the
+  recording gate in `app/api/wapi/webhook/route.ts` and the disclosure in `lib/agent.ts`
+  `systemPrompt`, both documented above as a two-place change that is easy to half-do.
+- **The daily word/challenge drop has no opt-in of its own — it reads `chime_settings` where
+  enabled**, same reasoning as the weekly recap two entries up: the groups worth dropping one more
+  unprompted message into are exactly the ones that already agreed to unprompted messages at all.
 
 ## Conventions
 
@@ -534,6 +551,10 @@ npm run chime-check     # chime-in restraint: the cadence, the daily cap, quiet 
 npm run recap-check     # the weekly recap: the Sunday-20:00 claim, grouping activity by identity
                         # rather than raw JID, and "on this day" reaching backward, not into the
                         # week just covered (needs DATABASE_URL, calls no model)
+npm run games-check     # group games: the secret never comes from the model's own say-so, one
+                        # active game per chat per type, ¿quién dijo esto? only ever reads this
+                        # chat's own log, and the daily word/challenge claim (needs DATABASE_URL,
+                        # calls no model)
 npm run leaderboard-check # the gap to the next place, ties included, checked against the
                         # arithmetic the board prints for itself
 npm run summary-check   # one real digest end to end: does it keep the decision, the deadline,
