@@ -268,6 +268,22 @@ export const FEATURES: Feature[] = [
     claim: "report what you have cost so far",
     tools: ["check_usage"],
   },
+  {
+    key: "games",
+    title: "Plays group games",
+    detail:
+      "¿Quién dijo esto? pulls a real line from this chat's own recorded history and the group guesses who said it — it needs 'summaries' or 'chime' already recording the group, or there is nothing to draw from. Palabra/reto del día posts a word or a daily challenge, on request or automatically once a day for chime-enabled groups. Ahorcado (hangman) and adivinanzas (riddles) are classic guessing rounds, one active game per type per chat, kept in Postgres so a restart never loses progress.",
+    claim: "run group games — ¿quién dijo esto?, palabra del día, ahorcado and adivinanzas",
+    tools: [
+      "start_who_said_it",
+      "start_word_of_day",
+      "start_hangman",
+      "start_riddle",
+      "guess_game",
+      "game_status",
+      "end_game",
+    ],
+  },
 ];
 
 const BY_KEY = new Map(FEATURES.map((f) => [f.key, f]));

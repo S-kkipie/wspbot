@@ -29,6 +29,7 @@ import * as stickerSite from "./sticker-site";
 import * as supporters from "./supporters";
 import * as roadmap from "./roadmap";
 import * as leaderboard from "./leaderboard";
+import * as games from "./games";
 import { render as renderHtml, capture } from "./render-html";
 import { toVoiceNote, VOICE_NOTE_MIMETYPE, VOICE_NOTE_FILENAME } from "./audio";
 import { fetchDecrypted } from "./inbound-media";
@@ -381,6 +382,18 @@ const systemPrompt = async (turn: Turn, on: Set<string>): Promise<string> => {
           "- `add_tasks` puts things on it, `complete_tasks` ticks them off (or puts one back with undo), `remove_tasks` deletes something that should never have been there.",
           "- People describe items rather than naming ids — \"mark the milk one done\" — so match their words to an item yourself and use its id. If two items could match, ask which.",
           "- The list is in front of you. Read it out when asked; do not call a tool just to look.",
+          "",
+        ]
+      : []),
+    ...(has("games")
+      ? [
+          "Games:",
+          "- `start_who_said_it` starts '¿quién dijo esto?': it pulls a real line from this chat's own recorded history and hides who said it. Only works in a chat already being recorded — if it refuses, say why rather than retrying. Post exactly the line it gives you, add nothing that hints at who said it, and ask the group to guess.",
+          "- `start_word_of_day` posts a word-of-the-day or a daily challenge that you write yourself — a real word with its meaning and an example, or a short task or acertijo. Use it when asked to start one.",
+          "- `start_hangman` and `start_riddle` start ahorcado and adivinanzas. You invent the secret word or the riddle and its answer yourself, as the tool's arguments — but never say it out loud in your reply, only what the tool tells you to show.",
+          "- However a round started, **you never judge a guess yourself.** Call `guess_game` with the type and exactly what was guessed, and say back what it tells you — even for a hangman word or a riddle answer you invented this same turn, because you will not remember it by the next one; only the database does.",
+          "- `game_status` re-shows the board without changing anything — reach for it if someone asks how a game is going, or the board has scrolled off. `end_game` gives up on one and always reveals the answer.",
+          "- Only one of each type runs at a time per chat; starting a new one quietly ends whichever was running.",
           "",
         ]
       : []),
@@ -1808,6 +1821,105 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
       if (!removed) return `No memory ${id} in this chat.`;
       console.log(`forgot [${removed.id}] ${removed.text}`);
       return `Deleted ${removed.id}: "${removed.text}".`;
+    },
+  }),
+
+  start_who_said_it: tool({
+    description:
+      "Start a '¿quién dijo esto?' round: pulls one real line from this chat's own recorded history, without saying who said it. Post the line and ask the group to guess. Only works in a chat already being recorded (summaries or chime) — if it refuses, say why rather than trying again. Ends any '¿quién dijo esto?' round already running here.",
+    inputSchema: z.object({}),
+    execute: async () => {
+      const result = await games.startWhoSaidIt(turn.chat, turn.senderName);
+      if (!result.ok) return result.why;
+      return `Post exactly this line and ask who said it, without adding a name or a hint of your own: "${result.text}"`;
+    },
+  }),
+
+  start_word_of_day: tool({
+    description:
+      "Post today's word-of-the-day or daily challenge, which you write yourself. Use when someone asks for one. For a word: invent a real, interesting word (a rare one, a peruanismo, or one from another language), its meaning in one line, and an example. For a challenge: a short task or acertijo, with a definite answer if it has one. Ends whatever word/challenge was posted before in this chat.",
+    inputSchema: z.object({
+      kind: z.enum(["word", "challenge"]),
+      prompt: z
+        .string()
+        .min(3)
+        .describe(
+          "Ready to post as-is, in your own voice for this group — the word with its meaning and an example, or the challenge/riddle text. Never include the answer here.",
+        ),
+      answer: z
+        .string()
+        .optional()
+        .describe("For a challenge with a concrete answer, the answer — kept hidden until revealed."),
+    }),
+    execute: async ({ kind, prompt, answer }) => {
+      await games.startWordOfDay(turn.chat, turn.senderName, { kind, prompt, answer });
+      return `Saved. Post this: ${prompt}`;
+    },
+  }),
+
+  start_hangman: tool({
+    description:
+      "Start a game of ahorcado (hangman) in this chat. Invent a real word yourself — letters only, no spaces or punctuation, 3 to 20 of them, in whatever language this chat speaks. Never reveal it in your reply; only the blanks. Ends any hangman already running here. The secret is kept in the database, not in your memory — always use `guess_game` to check a letter or a word, even for a game you started yourself, because you will not remember the word by the next turn.",
+    inputSchema: z.object({
+      secretWord: z.string().min(3).max(20).describe("The word to hide. Letters only, one word."),
+    }),
+    execute: async ({ secretWord }) => {
+      const result = await games.startHangman(turn.chat, turn.senderName, secretWord);
+      if (!result.ok) return result.why;
+      const status = await games.gameStatus(turn.chat, "hangman");
+      return `Started. Show them this, and never the word itself:\n${status.message}`;
+    },
+  }),
+
+  start_riddle: tool({
+    description:
+      "Start an adivinanza (riddle) in this chat. Invent the riddle and its answer yourself. Never reveal the answer in your reply. Ends any riddle already running here. The answer is kept in the database, not in your memory — always use `guess_game` to check a guess, even for a riddle you invented yourself this same turn.",
+    inputSchema: z.object({
+      riddle: z.string().min(5).describe("The riddle text, ready to post."),
+      answer: z.string().min(1).describe("The answer. Kept hidden until someone gets it or you reveal it."),
+      hint: z.string().optional().describe("An optional hint, given out only if you choose to share it."),
+    }),
+    execute: async ({ riddle, answer, hint }) => {
+      await games.startRiddle(turn.chat, turn.senderName, riddle, answer, hint);
+      return `Started. Post the riddle: ${riddle}`;
+    },
+  }),
+
+  guess_game: tool({
+    description:
+      "Check somebody's guess against the active game of this type in this chat — a name for '¿quién dijo esto?', a letter or a whole word for hangman, an answer for a riddle. Always call this rather than judging a guess yourself; the truth lives in the database and your own memory of a word or answer does not carry over between turns, even within the same conversation.",
+    inputSchema: z.object({
+      type: z.enum(["who_said_it", "hangman", "riddle"]),
+      guess: z.string().min(1).describe("Exactly what the person guessed."),
+    }),
+    execute: async ({ type, guess }) => {
+      const result = await games.guessGame(turn.chat, type, turn.senderName, guess);
+      if (!result.ok) return result.why;
+      return result.message;
+    },
+  }),
+
+  game_status: tool({
+    description:
+      "Show the current state of a game in this chat without changing anything — the blanks and misses for hangman, the riddle and its hint, how many guesses so far for '¿quién dijo esto?', or today's word/challenge. Use it when someone asks how a game is going, or to re-show the board after it has scrolled off.",
+    inputSchema: z.object({
+      type: z.enum(["who_said_it", "word_of_day", "hangman", "riddle"]),
+    }),
+    execute: async ({ type }) => {
+      const status = await games.gameStatus(turn.chat, type);
+      return status.message;
+    },
+  }),
+
+  end_game: tool({
+    description:
+      "Give up on, cancel, or force-reveal the active game of this type in this chat. Always reveals the answer. Use when the group wants to quit, or nobody is getting it.",
+    inputSchema: z.object({
+      type: z.enum(["who_said_it", "word_of_day", "hangman", "riddle"]),
+    }),
+    execute: async ({ type }) => {
+      const result = await games.endGame(turn.chat, type);
+      return result.ok ? result.message : result.why;
     },
   }),
 });
