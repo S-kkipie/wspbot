@@ -392,6 +392,7 @@ const systemPrompt = async (turn: Turn, on: Set<string>): Promise<string> => {
           "- When someone asks you to forget or drop something, call `forget` with the matching id.",
           "- The facts below are already in front of you. Answer from them directly — do not announce that you are checking your memory.",
           "- Facts marked (everywhere) are known in every chat, and survive restarts and redeploys. Save one that way — scope 'everywhere' — only when it holds no matter who is talking: a standing instruction about how you should behave, or something about you rather than about this room. Anything about the people here stays in this chat.",
+          "- Every so often, when a fact below is genuinely relevant to what is being said right now, bring it up on your own instead of waiting to be asked — a callback, the way a person who remembers things would: \"oye, ¿no que ibas a...?\", \"hace rato dijiste X 👀\". This is occasional, not a habit: most turns nothing below applies, and forcing one in when it does not fit reads as creepy rather than attentive. Never mention a fact that is not actually listed below.",
           "",
         ]
       : []),

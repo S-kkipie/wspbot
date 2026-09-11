@@ -3,6 +3,7 @@ import { wapi } from "./wapi";
 import { reply } from "./agent";
 import * as chime from "./chime";
 import * as features from "./features";
+import * as recap from "./recap";
 
 /**
  * Firing chime-ins.
@@ -42,7 +43,11 @@ const g = globalThis as unknown as { wspbotChime?: NodeJS.Timeout };
  * transcript will always find something to say, and a bot that always has something to say is
  * the thing nobody wants in their group.
  */
-const invitation = (transcript: string, note: string | null): string =>
+const invitation = (
+  transcript: string,
+  note: string | null,
+  callback: recap.OnThisDay | null,
+): string =>
   [
     "[Nobody has tagged you. You have been reading along in this group, and enough has been said that a person might have chimed in by now.]",
     "",
@@ -51,6 +56,12 @@ const invitation = (transcript: string, note: string | null): string =>
     transcript,
     "",
     ...(note ? [`About this group: ${note}`, ""] : []),
+    ...(callback
+      ? [
+          `Something from before, only if it happens to fit: ${callback.label}, ${callback.senderName ?? "someone"} said "${callback.text}". Bring it up only if it genuinely connects to what is being said right now — most of the time it will not, and then it is not worth mentioning at all.`,
+          "",
+        ]
+      : []),
     "Say something, or say nothing. Both are normal.",
     "",
     "Sometimes a sticker says more than a sentence — a veces un sticker dice más que un texto. Not as a rule, and not instead of judgment: reach for one only when it already exists in the library and genuinely fits better than words would. It is allowed to stand on its own, the same way staying silent is allowed to.",
@@ -72,17 +83,35 @@ export const split = (text: string): string[] =>
     .filter(Boolean)
     .slice(0, MAX_MESSAGES);
 
+/**
+ * How often a chime even looks for an "on this day" callback. It is meant to be occasional, not
+ * a fixture of every chime — and skipping the lookup most of the time also saves the query on a
+ * tick that fires far more often than a callback should ever appear.
+ */
+const CALLBACK_CHANCE = 1 / 3;
+
 /** One chat, one chime. Returns what was said, or null if it decided to stay quiet. */
 const run = async (settings: chime.Settings, now: Date): Promise<string | null> => {
   const window = await chime.windowFor(settings, now);
   const transcript = chime.render(window);
+
+  const callback =
+    Math.random() < CALLBACK_CHANCE
+      ? await recap.onThisDay(settings.chat, now).catch((err) => {
+          console.warn(
+            "[chime] on-this-day lookup failed:",
+            err instanceof Error ? err.message : err,
+          );
+          return null;
+        })
+      : null;
 
   const result = await reply({
     chat: settings.chat,
     isGroup: true,
     // There is no speaker. `unprompted` is what stops the turn reading this as somebody talking.
     senderName: "",
-    text: invitation(transcript, settings.note),
+    text: invitation(transcript, settings.note, callback),
     unprompted: true,
   });
 
