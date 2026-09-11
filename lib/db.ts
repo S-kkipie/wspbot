@@ -291,6 +291,38 @@ const migrate = async (): Promise<void> => {
     create index if not exists chimes_chat_day_idx on chimes (chat, day);
 
     /*
+     * The weekly recap piggybacks on chime_settings rather than a schedule of its own: the
+     * groups worth recapping are exactly the ones already opted into the bot reading along
+     * unprompted, and a second opt-in for the same room would only ask the same question twice.
+     * See lib/recap.ts.
+     *
+     * recapped_to is the watermark, moved only on a recap that actually sent — same reasoning as
+     * chimed_to. last_recap_minute is the claim, guarding against two overlapping ticks sending
+     * the same Sunday's recap twice; it is a separate key from chime's own last_minute-shaped
+     * claim above because the two run on entirely different cadences.
+     */
+    alter table chime_settings add column if not exists recapped_to timestamptz;
+    alter table chime_settings add column if not exists last_recap_minute text;
+
+    /*
+     * A small, long-lived archive of moments worth calling back to later — "hace un mes, alguien
+     * dijo…". Deliberately separate from logged_messages, which is pruned after a fortnight: the
+     * whole point of this table is to survive past that, so a callback can still reach a month or
+     * a year back. Populated only from what a recap itself already picked out as worth keeping,
+     * never written wholesale, so it stays small and the text in it was already judged notable
+     * once rather than being the raw transcript again.
+     */
+    create table if not exists notable_moments (
+      id          bigserial primary key,
+      chat        text        not null,
+      text        text        not null,
+      sender_name text,
+      said_at     timestamptz not null,
+      created_at  timestamptz not null default now()
+    );
+    create index if not exists notable_moments_chat_said_idx on notable_moments (chat, said_at);
+
+    /*
      * GitHub, as one account this deployment acts as. One row, always id 1: two rows would mean
      * every call site had to answer "which account?" for no gain.
      *
