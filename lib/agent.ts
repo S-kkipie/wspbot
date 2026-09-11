@@ -617,6 +617,9 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
           fileName: VOICE_NOTE_FILENAME,
         });
 
+        // "grabando un audio…" right before it lands, same best-effort spirit as `composing`.
+        await wapi.sendPresence(turn.chat, "recording").catch(() => {});
+
         await wapi.send({ to: turn.chat, audioUrl: url });
         sent.push("voice note");
         return "Sent the voice note.";
@@ -1880,6 +1883,13 @@ export const reply = async (turn: Turn): Promise<Reply> => {
    * which is the difference between "off" and "refuses when asked".
    */
   if (on.has("github") && !(await github.availableIn(turn.chat))) on.delete("github");
+
+  /*
+   * "escribiendo…" while the turn is worked out — one per turn, fired before the model call
+   * rather than around every tool inside it. Best-effort, same as `markRead`: a presence failure
+   * must never cost a reply.
+   */
+  await wapi.sendPresence(turn.chat, "composing").catch(() => {});
 
   const content = await buildUserContent(turn, on);
   const history = await loadHistory(turn.chat);

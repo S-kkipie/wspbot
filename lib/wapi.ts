@@ -58,6 +58,12 @@ const admin = (): WapiClient => {
 
 export type SendResult = { msgId: number; jid: string; status: string };
 
+/** What `/api/send-presence-update` accepts. Not part of the vendored SDK — see `sendPresence`. */
+export type PresenceType = "available" | "unavailable" | "composing" | "recording" | "paused";
+
+/** A presence update never gets to run for more than this; it is a nicety, not a reply. */
+const PRESENCE_TIMEOUT_MS = 5_000;
+
 /**
  * What we send, which is the SDK's union plus one deliberate widening: it does not allow a
  * caption alongside a document, and we send one.
@@ -189,5 +195,33 @@ export const wapi = {
     key: Parameters<WapiClient["messages"]["markRead"]>[0],
   ): Promise<void> {
     await client().messages.markRead(key);
+  },
+
+  /**
+   * "escribiendo…" / "grabando audio…" — shown before the bot actually sends something.
+   *
+   * Not a method of the vendored SDK: `/api/send-presence-update` has no resource in
+   * `lib/wapi-sdk/resources/` to hang off, and hand-adding one there would be silently lost the
+   * next time `npm run vendor-wapi-sdk` re-fetches it from upstream. Called directly instead,
+   * against the same base URL and session key every other call here uses. Always best-effort —
+   * callers are expected to swallow the error, the way they already do for `markRead`.
+   */
+  async sendPresence(jid: string, type: PresenceType): Promise<void> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PRESENCE_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${config.wapiBaseUrl()}/api/send-presence-update`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.wapiApiKey()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ jid, type }),
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`wapi presence update failed (${res.status})`);
+    } finally {
+      clearTimeout(timer);
+    }
   },
 };
