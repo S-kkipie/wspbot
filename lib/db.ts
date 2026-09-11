@@ -305,6 +305,20 @@ const migrate = async (): Promise<void> => {
     alter table chime_settings add column if not exists last_recap_minute text;
 
     /*
+     * The daily palabra/reto del día drop piggybacks on chime_settings the same way the weekly
+     * recap does, and for the same reason: the groups worth dropping an unprompted daily message
+     * into are exactly the ones that already agreed to the bot reading along and speaking without
+     * being tagged. A separate opt-in table for one more once-a-day message would ask the same
+     * consent question a third time. See lib/games.ts claimWordOfDayDue.
+     *
+     * Only the claim lives here — same shape as last_recap_minute, guarding against two
+     * overlapping ticks posting the same day's word twice. There is no watermark to move forward
+     * like recapped_to: the content is generated fresh each day rather than read from a window of
+     * messages, so there is nothing to mark "already covered".
+     */
+    alter table chime_settings add column if not exists games_word_last_minute text;
+
+    /*
      * A small, long-lived archive of moments worth calling back to later — "hace un mes, alguien
      * dijo…". Deliberately separate from logged_messages, which is pruned after a fortnight: the
      * whole point of this table is to survive past that, so a callback can still reach a month or
@@ -595,6 +609,38 @@ const migrate = async (): Promise<void> => {
       connected_by   text,
       connected_at   timestamptz not null default now()
     );
+
+    /*
+     * Group games: ¿quién dijo esto?, palabra/reto del día, ahorcado, adivinanzas. See lib/games.ts.
+     *
+     * One table for all four rather than one per game — they share the same shape (a chat, a
+     * type, whether it is still going, and a blob of state specific to that type) and a shared
+     * table is what makes "one active game per chat per type" a single constraint instead of four
+     * near-identical ones.
+     *
+     * data is jsonb because each type stores something different — a picked line and its guesses,
+     * a secret word and which letters have been tried, a riddle and its answer — and a scoring or
+     * format change should not need a migration. Nothing in it is ever trusted back from the
+     * model as the source of truth for whether a guess is right; every check reads this row.
+     */
+    create table if not exists games (
+      id          bigserial primary key,
+      chat        text        not null,
+      -- who_said_it | word_of_day | hangman | riddle
+      type        text        not null,
+      -- active | finished
+      status      text        not null default 'active',
+      data        jsonb       not null default '{}'::jsonb,
+      started_by  text,
+      created_at  timestamptz not null default now(),
+      updated_at  timestamptz not null default now(),
+      finished_at timestamptz
+    );
+    -- The constraint the game logic leans on: starting a new one first finishes any old one, so
+    -- this never actually fires, but it is what makes that a guarantee rather than a convention.
+    create unique index if not exists games_one_active_per_type
+      on games (chat, type) where status = 'active';
+    create index if not exists games_chat_type_idx on games (chat, type, id desc);
   `);
 };
 
