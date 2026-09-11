@@ -53,6 +53,8 @@ const invitation = (transcript: string, note: string | null): string =>
     ...(note ? [`About this group: ${note}`, ""] : []),
     "Say something, or say nothing. Both are normal.",
     "",
+    "Sometimes a sticker says more than a sentence — a veces un sticker dice más que un texto. Not as a rule, and not instead of judgment: reach for one only when it already exists in the library and genuinely fits better than words would. It is allowed to stand on its own, the same way staying silent is allowed to.",
+    "",
     "Reply with the message you would send, exactly as you would send it — no preamble, no explanation of why you are speaking. If you would send two or three short messages instead of one, separate them with a blank line. If there is genuinely nothing worth adding, reply with nothing at all.",
   ].join("\n");
 
