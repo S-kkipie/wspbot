@@ -17,6 +17,7 @@
     "supporters-check": "tsx --conditions=react-server --env-file=.env scripts/supporters-check.mts",
     "github-check": "tsx --conditions=react-server --env-file=.env scripts/github-check.mts",
     "chime-check": "tsx --conditions=react-server --env-file=.env scripts/chime-check.mts",
+    "recap-check": "tsx --conditions=react-server --env-file=.env scripts/recap-check.mts",
     "roadmap-check": "tsx --conditions=react-server --env-file=.env scripts/roadmap-check.mts",
     "leaderboard-check": "tsx --conditions=react-server --env-file-if-exists=.env scripts/leaderboard-check.mts",
     "features-check": "tsx --conditions=react-server scripts/features-check.mts",

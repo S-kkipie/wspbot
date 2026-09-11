@@ -36,9 +36,9 @@ bot   → Done.
 | --- | --- |
 | **What it is** | One Next.js container: a webhook that answers WhatsApp, and a dashboard that decides what it may do |
 | **Abilities** | 25 switchable features over 49 model tools, plus 3 that are always on |
-| **Storage** | Postgres, 25 tables — memory, history, stickers, schedules, supporters, roadmap, spend |
+| **Storage** | Postgres, 26 tables — memory, history, stickers, schedules, supporters, roadmap, spend |
 | **Runs on** | A Dokploy VPS behind Traefik, alongside the WhatsApp gateway it talks to |
-| **Guarded by** | 20 check scripts that exercise the real thing rather than asserting about it |
+| **Guarded by** | 21 check scripts that exercise the real thing rather than asserting about it |
 
 ## Contents
 
@@ -48,7 +48,7 @@ bot   → Done.
 
 **Use it** — [The landing page](#the-landing-page) · [The dashboard](#the-dashboard) · [Signing in](#signing-in) · [When it replies](#when-it-replies)
 
-**What it can do** — [GitHub](#github) · [Chiming in](#chiming-in) · [Put things in the chat](#what-it-can-put-in-the-chat) · [Stickers](#stickers) · [Rendering HTML](#rendering-html) · [Screenshots](#a-picture-of-a-real-page) · [Memory](#memory) · [The checklist](#the-checklist) · [Reactions](#reactions) · [Scheduled reminders](#scheduled-reminders) · [Scheduled summaries](#scheduled-summaries) · [Notion](#notion) · [Google Sheets](#google-sheets) · [Knows what it is](#what-it-knows-about-itself)
+**What it can do** — [GitHub](#github) · [Chiming in](#chiming-in) · [The weekly recap](#the-weekly-recap) · [Put things in the chat](#what-it-can-put-in-the-chat) · [Stickers](#stickers) · [Rendering HTML](#rendering-html) · [Screenshots](#a-picture-of-a-real-page) · [Memory](#memory) · [The checklist](#the-checklist) · [Reactions](#reactions) · [Scheduled reminders](#scheduled-reminders) · [Scheduled summaries](#scheduled-summaries) · [Notion](#notion) · [Google Sheets](#google-sheets) · [Knows what it is](#what-it-knows-about-itself)
 
 **Keep it honest** — [Rate limiting](#rate-limiting) · [Usage and cost](#usage-and-cost) · [Moving context between groups](#moving-context-between-groups)
 
@@ -82,14 +82,14 @@ flowchart LR
         LIMIT["rate limit<br/>before anything costs money"]
         REC["recorder<br/>untagged, recorded groups only"]
         AGENT["agent<br/>system prompt + 48 tools"]
-        TIMERS["timers<br/>session 2m · reminders 30s · digests 1m · chime-ins 1m"]
-        FEAT["features<br/>24 switches own every tool<br/>read from Postgres every turn"]
+        TIMERS["timers<br/>session 2m · reminders 30s · digests 1m · chime-ins 1m · recaps 1m"]
+        FEAT["features<br/>25 switches own every tool<br/>read from Postgres every turn"]
         FF["ffmpeg · Chromium<br/>stickers · voice · video · rendering"]
         PROXY["proxy.ts<br/>gates every page but the root"]
         PAGES["landing · /dashboard"]
     end
 
-    PG[("Postgres<br/>24 tables")]
+    PG[("Postgres<br/>26 tables")]
 
     WA -->|"every message"| SESSION
     SESSION -->|"signed webhook"| HOOK
@@ -890,6 +890,50 @@ you switch anything on.
 npm run chime-check     # the cadence, the cap, quiet hours across midnight, and the claim
 ```
 
+## The weekly recap
+
+Every group set up for chiming in also gets a recap of its week, Sunday at 20:00 in
+`BOT_TIMEZONE`. No separate switch: a group already agreeing to be read and spoken to unprompted
+has already answered the only consent question a recap would ask again, so it piggybacks on
+`chime_settings` instead of adding a second opt-in for the same room. Disabling a group there, or
+switching `chime` off, silences its recap along with everything else.
+
+```
+*Los Pana* · recap semanal · 08 sep → 14 sep
+
+Semana tranquila, la mayoría coordinando la salida del sábado. Beto casi manda a comprar
+las entradas equivocadas — se salvó por diez minutos.
+
+📊 214 mensajes esta semana. Los más activos: @51999888777 (54), @51999777666 (31), @51999666555 (19)
+
+📼 hace un mes, Ana dijo: "para la otra que alguien más pague el Uber 😭"
+```
+
+Three things happen at once:
+
+- **What was actually said** is written by the model from the week's transcript — themes and the
+  moments that stood out, in Spanish, informal, and in the group's own register rather than a
+  fixed voice.
+- **The numbers never are.** Total messages and who was most active are counted in SQL by
+  `recap.activityStats`, spliced in after the prose. A model asked to also report the count that
+  proves who talked most is a model that will eventually get the count wrong in the one place
+  everyone can check it.
+- **The people it names are actually tagged.** The most active senders are attached to the send
+  as `mentions` — the same field a normal reply uses to notify whoever it is answering — not just
+  typed into the text as a name nobody is notified about.
+- **"On this day"**, when there is one: a callback to something worth remembering from roughly a
+  week, a month, six months or a year back. Every recap picks a handful of its own week's lines
+  worth keeping and archives them verbatim into `notable_moments` — a table nothing prunes, unlike
+  the fortnight-old `logged_messages` a recap is built from — so a callback is always something
+  that was actually said, never a paraphrase. A brand-new deployment has nothing archived yet,
+  and the line is simply left out until a few weeks of recaps have written some. The same archive
+  occasionally surfaces in an ordinary chime, when it happens to fit what is being said.
+
+```bash
+npm run recap-check     # the Sunday claim, grouping by identity not by JID, and "on this day"
+                        # reaching backward rather than into the week just covered
+```
+
 ## Following a vote
 
 A hackathon leaderboard is a page somebody reloads forty times a day. The bot follows it instead,
@@ -1112,6 +1156,11 @@ the bot should behave, or something about the bot itself. Those are saved with s
 like any other row. The bot is told to reserve that scope for facts that are genuinely
 chat-independent; anything about the people in a room stays in that room.
 
+**It also brings facts up on its own, occasionally.** The prompt nudges the model to weave a
+stored fact into a reply or a chime when it is genuinely relevant — a callback, not a lookup:
+*"oye, ¿no que ibas a...?"*. This is deliberately rare rather than a habit, and it never mentions
+a fact that is not actually stored — nothing here is invented.
+
 `/reset` in a chat clears the running conversation but keeps the memories.
 
 To set a fact visible in **every** chat, insert it against the `global` scope:
@@ -1161,6 +1210,8 @@ npm run models-check    # the configured models accept the parameters this app s
 npm run draw-check      # generates one real image and checks alpha survives (costs money)
 npm run github-check    # every GitHub refusal, and one real read (needs DATABASE_URL)
 npm run chime-check     # chime-in restraint: cadence, daily cap, quiet hours, double-claim
+npm run recap-check     # the weekly recap: the Sunday claim, activity grouped by identity, and
+                        # "on this day" reaching backward, not into the week just covered
 npm run leaderboard-check # the gap arithmetic, ties included, against the board's own answer
 npm run render-check    # a real Chromium render, and a real page captured: a PNG, a table that
                         # stays a table, and every private address refused

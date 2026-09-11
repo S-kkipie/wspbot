@@ -61,6 +61,8 @@ lib/leaderboard.ts               a public vote board: the gap to the next place,
 lib/leaderboard-runner.ts        fires it, without the model — the sentence is a subtraction
 lib/summaries.ts                 scheduled digests: schedules, the log, the transcript
 lib/summary-recorder.ts          writing down a recorded group; lib/summary-runner.ts fires it
+lib/recap.ts                     the weekly recap: stats, "on this day", the notable-moment archive
+lib/recap-runner.ts              fires it Sunday 20:00, for every chime-enabled group
 lib/cron.ts                      five-field cron, evaluated as "does this minute match?"
 lib/usage.ts                     token accounting, cost estimate
 ```
@@ -205,6 +207,16 @@ like a simplification opportunity.
   Getting it backwards means messaging a group at four in the morning, which is the one failure
   here nobody forgives. `npm run chime-check` asserts both directions, and the daily cap in a
   local day rather than a UTC one.
+- **The weekly recap has no opt-in of its own — it reads `chime_settings where enabled`.** The
+  groups worth recapping are exactly the groups already agreeing to be recorded and spoken to
+  unprompted; a second switch for the same room would ask the same consent question twice. It
+  follows that turning `chime` off, or disabling a group there, silences its recap too — that is
+  the point, not a bug to route around with a separate toggle.
+- **`notable_moments` is deliberately not `logged_messages`.** The latter is pruned after a
+  fortnight, so "on this day" reaching back a month or a year needs its own table that nothing
+  else prunes. It is written to only by a recap picking a handful of lines it already judged
+  worth keeping — never by copying the transcript wholesale — which is what keeps it small and
+  keeps a callback's text exactly what was said rather than a later paraphrase of it.
 - **`new URL()` rewrites an IPv6 host, and it broke the SSRF guard.**
 - **The wapi SDK is vendored, not installed, and needs one edit on the way in.** It is not
   published to npm; `npm run vendor-wapi-sdk` fetches it with `giget` and then strips the `.js`
@@ -519,6 +531,9 @@ npm run github-check    # every GitHub refusal — the allowlist, each switch, t
                         # and that nothing works before an account is connected
 npm run chime-check     # chime-in restraint: the cadence, the daily cap, quiet hours across
                         # midnight, and that claiming twice cannot double-fire
+npm run recap-check     # the weekly recap: the Sunday-20:00 claim, grouping activity by identity
+                        # rather than raw JID, and "on this day" reaching backward, not into the
+                        # week just covered (needs DATABASE_URL, calls no model)
 npm run leaderboard-check # the gap to the next place, ties included, checked against the
                         # arithmetic the board prints for itself
 npm run summary-check   # one real digest end to end: does it keep the decision, the deadline,
