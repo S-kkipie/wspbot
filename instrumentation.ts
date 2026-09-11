@@ -21,6 +21,9 @@ export async function register() {
   const { startChimes } = await import("./lib/chime-runner");
   startChimes();
 
+  const { startRecap } = await import("./lib/recap-runner");
+  startRecap();
+
   const { startLeaderboard } = await import("./lib/leaderboard-runner");
   startLeaderboard();
 }

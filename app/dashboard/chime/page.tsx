@@ -62,6 +62,13 @@ export default async function ChimePage() {
         switching a group off stops both at once.
       </div>
 
+      <div className="panel notice" style={{ marginTop: "0.8rem" }}>
+        Every group here also gets a <strong>weekly recap</strong>, Sunday 20:00 in{" "}
+        <code>{timeZone}</code> — no separate switch, since agreeing to this is agreeing to that
+        too. It names and @-mentions the most active people, and a callback to something notable
+        from a while back once there is enough history for one.
+      </div>
+
       <h2>Groups{settings?.length ? ` · ${settings.length}` : ""}</h2>
       <div className="panel">
         {settings === null ? (
