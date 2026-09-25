@@ -96,6 +96,14 @@ export type Reply = {
 type HistoryRow = { role: string; content: string };
 
 /** Oldest-first, which is the order the model expects — the index is on `id desc`. */
+/**
+ * Saved turns end in "(sent: reaction 😂, sticker (…))" so the transcript records what was done.
+ * Fed back as the bot's own words, the model learned to *write* that suffix instead of calling
+ * the tools — and it went out to WhatsApp verbatim. Strip it on the way in and on the way out.
+ */
+const SENT_NOTE = /\s*\(sent:[\s\S]*$/;
+const stripSentNote = (text: string): string => text.replace(SENT_NOTE, "").trim();
+
 const loadHistory = async (chat: string): Promise<ModelMessage[]> => {
   const rows = await query<HistoryRow>(
     "select role, content from (select id, role, content from messages where chat = $1 order by id desc limit $2) recent order by id",
@@ -103,7 +111,7 @@ const loadHistory = async (chat: string): Promise<ModelMessage[]> => {
   );
   return rows.map((row) => ({
     role: row.role === "assistant" ? "assistant" : "user",
-    content: row.content,
+    content: row.role === "assistant" ? stripSentNote(row.content) : row.content,
   }));
 };
 
@@ -1639,7 +1647,7 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
 
   propose_roadmap: tool({
     description:
-      "Suggest something new for the roadmap on behalf of the person speaking. Only supporters may propose. A suggestion is not votable straight away — it waits for Jibaru to approve it — so say that plainly rather than implying it is now on the list.",
+      "Suggest something new for the roadmap on behalf of the person speaking. Only supporters may propose. A suggestion is not votable straight away — it waits for the person who runs this deployment to approve it — so say that plainly rather than implying it is now on the list.",
     inputSchema: z.object({
       title: z.string().describe("One line, in their words, naming the thing they want."),
       detail: z
@@ -1661,7 +1669,7 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
         state: "proposed",
         proposedBy: supporter.handles[0] ?? null,
       });
-      return `Noted "${title}" as a suggestion. It is waiting for Jibaru to approve it before anyone can vote on it.`;
+      return `Noted "${title}" as a suggestion. It is waiting for ${config.ownerName()} to approve it before anyone can vote on it.`;
     },
   }),
 
@@ -2025,7 +2033,7 @@ export const reply = async (turn: Turn): Promise<Reply> => {
     usage: result.usage,
   });
 
-  const text = result.text.trim();
+  const text = stripSentNote(result.text.trim());
 
   /**
    * Only fall back to an apology when the turn produced nothing at all. A poll with no

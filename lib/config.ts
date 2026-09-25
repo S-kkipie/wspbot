@@ -84,6 +84,12 @@ export const config = {
   },
 
   /** Where this app is reachable, used to build the Notion OAuth redirect. */
+  /**
+   * Who runs this deployment — the person with the switches, the dashboard and the database.
+   * The code is Jibaru's either way; a fork run by someone else must not send people to him.
+   */
+  ownerName: () => optional("BOT_OWNER_NAME") ?? "Jibaru",
+
   appUrl: () => (optional("APP_URL") ?? "https://wspbot.crafter.run").replace(/\/$/, ""),
 
   /**
