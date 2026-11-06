@@ -42,7 +42,7 @@ export default async function LimitsPage() {
           <div className="row">
             <dt>Everyone without a row below</dt>
             <dd>
-              {config.defaultRateLimit()} per minute
+              {config.rateLimited() ? `${config.defaultRateLimit()} per minute` : "off — BOT_RATE_LIMIT_PER_MINUTE=off"}
             </dd>
           </div>
         </dl>

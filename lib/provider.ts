@@ -59,10 +59,31 @@ export function chatModel(id: string) {
  * named tier; Gemini takes a thinking-token budget, so the tiers below are a rough equivalence,
  * not a translation — there is no exact mapping between the two.
  *
- * A Claude model ignores both: options are keyed by provider, so `@ai-sdk/anthropic` never reads
- * them, and the reply runs without extended thinking — which is what a chat reply wants anyway.
+ * A Claude model takes its own `effort` (`output_config.effort`, which ccapi hands to the
+ * subagent): Sonnet 5.5 thinks by default at `high`, far slower than a chat reply wants. Haiku 4.5
+ * takes no effort at all, so it gets none. Options are keyed by provider, so each SDK only ever
+ * reads its own.
  */
-export function reasoningProviderOptions(effort: string): Record<string, JsonRecord> {
+export function reasoningProviderOptions(effort: string, model?: string): Record<string, JsonRecord> {
+  const claude: Record<string, JsonRecord> =
+    model && isClaude(model) && !model.startsWith("claude-haiku-")
+      ? { anthropic: { effort: effort === "minimal" ? "low" : effort } }
+      : {};
+  return { ...claude, ...providerReasoning(effort) };
+}
+
+/**
+ * Options for `generateObject`. ccapi has no structured-output mode — it answers
+ * `output_config.format` with plain prose, which the SDK then fails to parse — so a Claude model is
+ * asked for its object through a tool call instead (`jsonTool`), which ccapi carries. Through
+ * ccapi the forced tool choice is an instruction, not the API's `tool_choice`, so Sonnet 5.5's
+ * refusal of forced tool use never comes up. Other providers need nothing.
+ */
+export function objectProviderOptions(model: string): Record<string, JsonRecord> {
+  return isClaude(model) ? { anthropic: { structuredOutputMode: "jsonTool" } } : {};
+}
+
+function providerReasoning(effort: string): Record<string, JsonRecord> {
   if (isGoogle()) {
     const thinkingBudgets: Record<string, number> = {
       minimal: 0,

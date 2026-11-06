@@ -230,6 +230,12 @@ export const config = {
   timezone: () => optional("BOT_TIMEZONE") ?? "UTC",
 
   /**
+   * Whether anyone is rate limited at all. `BOT_RATE_LIMIT_PER_MINUTE=off` turns it off entirely:
+   * nobody is counted or turned away, per-person rows included.
+   */
+  rateLimited: () => (optional("BOT_RATE_LIMIT_PER_MINUTE") ?? "").toLowerCase() !== "off",
+
+  /**
    * Calls one person may make per minute before being turned away. Per-person overrides live in
    * the `rate_limits` table; this is only the fallback for anyone not listed there.
    */

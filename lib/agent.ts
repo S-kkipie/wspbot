@@ -2028,7 +2028,7 @@ export const reply = async (turn: Turn): Promise<Reply> => {
     tools: features.withdraw(toolsFor(turn, sent), on),
     // Without this the run stops after the first tool call and never says anything.
     stopWhen: stepCountIs(MAX_STEPS),
-    providerOptions: reasoningProviderOptions(config.effort()),
+    providerOptions: reasoningProviderOptions(config.effort(), config.model()),
   });
 
   await usage.record({

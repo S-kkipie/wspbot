@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { config } from "./config";
-import { chatModel, drawImage } from "./provider";
+import { chatModel, drawImage, objectProviderOptions } from "./provider";
 import { query } from "./db";
 import { wapi } from "./wapi";
 // Aliased: `toSticker` here already means "database row -> Sticker".
@@ -254,6 +254,7 @@ const describe = async (
   try {
     const result = await generateObject({
       model: chatModel(config.visionModel()),
+      providerOptions: objectProviderOptions(config.visionModel()),
       schema: z.object({
         label: z
           .string()

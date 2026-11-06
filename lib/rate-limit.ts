@@ -61,6 +61,7 @@ const quotaFor = async (userId: string): Promise<number> => {
  * own window permanently full and never recover.
  */
 export const check = async (userId: string, chat: string): Promise<Decision> => {
+  if (!config.rateLimited()) return { allowed: true };
   const quota = await quotaFor(userId);
 
   const [{ used } = { used: "0" }] = await query<{ used: string }>(

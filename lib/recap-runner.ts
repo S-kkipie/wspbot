@@ -1,6 +1,6 @@
 import "server-only";
 import { generateObject } from "ai";
-import { chatModel } from "./provider";
+import { chatModel, objectProviderOptions } from "./provider";
 import { z } from "zod";
 import { config } from "./config";
 import { wapi } from "./wapi";
@@ -85,6 +85,7 @@ export const compose = async (
 
   const result = await generateObject({
     model: chatModel(config.summaryModel()),
+    providerOptions: objectProviderOptions(config.summaryModel()),
     schema: RecapSchema,
     system: INSTRUCTIONS,
     prompt: [

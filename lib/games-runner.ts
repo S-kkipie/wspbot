@@ -1,7 +1,7 @@
 import "server-only";
 import { generateObject } from "ai";
 import { z } from "zod";
-import { chatModel } from "./provider";
+import { chatModel, objectProviderOptions } from "./provider";
 import { config } from "./config";
 import { wapi } from "./wapi";
 import * as games from "./games";
@@ -76,6 +76,7 @@ export const compose = async (chat: string, rejected: string | null = null): Pro
 
   const result = await generateObject({
     model: chatModel(config.summaryModel()),
+    providerOptions: objectProviderOptions(config.summaryModel()),
     schema: WordOfDaySchema,
     system: INSTRUCTIONS,
     prompt: [

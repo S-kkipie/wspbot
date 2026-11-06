@@ -2,7 +2,7 @@ import "server-only";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { config } from "./config";
-import { chatModel } from "./provider";
+import { chatModel, objectProviderOptions } from "./provider";
 import { wapi } from "./wapi";
 import { fetchDecrypted } from "./inbound-media";
 import * as summaries from "./summaries";
@@ -34,6 +34,7 @@ const describeImage = async (
   try {
     const result = await generateObject({
       model: chatModel(config.visionModel()),
+      providerOptions: objectProviderOptions(config.visionModel()),
       schema: z.object({
         description: z
           .string()
