@@ -41,7 +41,8 @@ const WordOfDaySchema = z.object({
 
 const INSTRUCTIONS = [
   "Eres SkkippIA, y vas a postear la palabra o el reto del dia en un grupo de WhatsApp.",
-  "Una palabra es algo interesante (rebuscada, un peruanismo, algo en otro idioma) con su significado y un ejemplo de uso; un reto es un desafio corto o un acertijo con una respuesta concreta.",
+  "Una palabra es una palabra o expresion popular que la gente de verdad usa (jerga del dia a dia, algo de internet o de memes) con su significado y un ejemplo de uso; un reto es un desafio corto o un acertijo con una respuesta concreta.",
+  "Todo de cultura popular, facil de pillar en un grupo de amigos: nada rebuscado, academico ni de otros idiomas.",
   "Espanol informal y breve -- esto es un chat de WhatsApp, no un diccionario. Una o dos lineas basta.",
 ].join("\n");
 
@@ -50,12 +51,11 @@ const INSTRUCTIONS = [
  * somewhere else it lands on the same famous riddle almost every time — the theme is that push.
  */
 const THEMES = [
-  "comida peruana", "animales", "cosas de la casa", "la naturaleza", "el cuerpo humano",
-  "el celular y la tecnologia", "musica", "futbol y deportes", "el clima", "la calle y el transporte",
-  "numeros y logica", "palabras del quechua", "jerga limena", "historia del Peru", "ciencia",
-  "el mar y la playa", "el colegio y la universidad", "la chamba", "fiestas y tradiciones",
-  "el tiempo y los relojes", "juegos y videojuegos", "plata y compras", "viajes", "el cine",
-];
+  "futbol", "musica del momento", "series y peliculas", "videojuegos", "memes e internet", "redes sociales",
+  "comida y comida rapida", "el celular y las apps", "famosos y farandula", "anime", "superheroes",
+  "la fiesta y el tono", "el colegio y la universidad", "la chamba", "el gym", "las citas y el amor",
+  "plata y compras", "viajes y la playa", "mascotas", "el trafico y el transporte", "deportes", "musica urbana",
+]
 
 /** The well-worn answers the model reaches for first, named so it stops reaching for them. */
 const CLASSICS = "el mapa, la vela, el eco, la sombra, la aguja, el huevo, el silencio, la letra E";

@@ -1846,7 +1846,7 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
 
   start_word_of_day: tool({
     description:
-      "Post today's word-of-the-day or daily challenge, which you write yourself. Use when someone asks for one. For a word: invent a real, interesting word (a rare one, a peruanismo, or one from another language), its meaning in one line, and an example. For a challenge: a short task or acertijo of your own, not a well-known classic, with a definite answer if it has one. Ends whatever word/challenge was posted before in this chat. Refuses a word or answer this chat already had, listing what to avoid — then invent a different one and call it again.",
+      "Post today's word-of-the-day or daily challenge, which you write yourself. Use when someone asks for one. For a word: a popular word or expression people actually use (everyday slang, something from the internet or memes) — nothing obscure, academic or from another language — its meaning in one line, and an example. For a challenge: a short task or acertijo of your own, not a well-known classic, with a definite answer if it has one. Ends whatever word/challenge was posted before in this chat. Refuses a word or answer this chat already had, listing what to avoid — then invent a different one and call it again.",
     inputSchema: z.object({
       kind: z.enum(["word", "challenge"]),
       prompt: z
