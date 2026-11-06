@@ -244,6 +244,42 @@ try {
     `— ${JSON.stringify(wodAfterEnd)}`,
   );
 
+  // -- repeats -------------------------------------------------------------------
+  /*
+   * Every round is invented by a model that never sees the earlier ones, so left alone it posts
+   * the single most famous riddle again and again ("un mapa" was most days in one group). What
+   * this chat already had is the database's to remember, and a repeat is refused the same way a
+   * bad hangman word is: with a reason the model can act on.
+   */
+  console.log("\nrepeats:");
+  const answers = await games.recentAnswers(CHAT);
+  check(
+    "recent answers cover riddles, hangman and the word of the day",
+    ["el viento", "manzana", "jarana"].every((a) => answers.includes(a)),
+    `— ${JSON.stringify(answers)}`,
+  );
+  const sameRiddle = await games.startRiddle(CHAT, "tester", "Sopla y no se ve.", "Viento");
+  check("a riddle with an answer this chat already had is refused", !sameRiddle.ok, `— ${JSON.stringify(sameRiddle)}`);
+  check(
+    "and the refusal names what to avoid",
+    !sameRiddle.ok && sameRiddle.why.includes("viento"),
+    `— ${JSON.stringify(sameRiddle)}`,
+  );
+  const sameWord = await games.startWordOfDay(CHAT, "SkkippIA", { kind: "word", prompt: "*Jarana*: fiesta, juerga." });
+  check("so is a word of the day this chat already had, read from its bold", !sameWord.ok);
+  const sameChallenge = await games.startWordOfDay(CHAT, "SkkippIA", {
+    kind: "challenge",
+    prompt: "¿Qué sopla sin boca?",
+    answer: "El viento.",
+  });
+  check("and a challenge whose answer was a riddle's, article and full stop aside", !sameChallenge.ok);
+  const sameSecret = await games.startHangman(CHAT, "tester", "MANZANA");
+  check("and a hangman word used before", !sameSecret.ok);
+  const fresh = await games.startRiddle(CHAT, "tester", "Tiene dientes y no come.", "el peine");
+  check("a new answer is still welcome", fresh.ok, `— ${JSON.stringify(fresh)}`);
+  const elsewhere = await games.recentAnswers(CHAT_WOD);
+  check("and one chat's history never limits another's", !elsewhere.includes("el peine"));
+
   // -- the daily claim -----------------------------------------------------------
   console.log("\nthe daily word/challenge claim:");
   await query(

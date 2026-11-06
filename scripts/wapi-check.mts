@@ -25,7 +25,7 @@ const check = (label: string, pass: boolean, detail = "") => {
   console.log(pass ? "  PASS" : "  FAIL", label, detail);
 };
 
-const baseUrl = process.env["WAPI_BASE_URL"] ?? "https://api.wapi.crafter.run";
+const baseUrl = process.env["WAPI_BASE_URL"] ?? "http://api:3001";
 
 if (!process.env["WAPI_API_KEY"]) {
   console.error("WAPI_API_KEY is not set — nothing to check against.");

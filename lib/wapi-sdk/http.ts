@@ -29,7 +29,7 @@ export type RequestOptions = {
   signal?: AbortSignal;
 };
 
-const DEFAULT_BASE_URL = "https://api.wapi.crafter.run";
+const DEFAULT_BASE_URL = "http://api:3001";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export class Transport {

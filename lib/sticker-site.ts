@@ -66,7 +66,7 @@ const PAGE_ALLOWANCE = 256 * 1024;
 /**
  * Build the whole site: one picture per sticker, plus the page that shows them.
  *
- * Crafter Station's colours, because it is the bot's own library and it will be linked from
+ * The landing page's colours, because it is the bot's own library and it will be linked from
  * chats where the bot has a face. Everything inline — no fonts, no stylesheet, no script — so
  * the page works the moment Pages serves it, from a subdirectory, offline, and in a webview.
  */
@@ -171,7 +171,7 @@ ${cards || '    <p class="empty">Nothing here yet.</p>'}
   </div>
   <footer>
     Collected by a WhatsApp bot built with
-    <a href="https://github.com/Jibaru/wspbot">wspbot</a>.
+    <a href="https://github.com/S-kkipie/wspbot">wspbot</a>.
   </footer>
 </main>
 </body>

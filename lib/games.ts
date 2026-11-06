@@ -81,6 +81,79 @@ const supersede = (chat: string, type: GameType): Promise<unknown[]> =>
     [chat, type],
   );
 
+// -- Repeats ------------------------------------------------------------------
+
+/**
+ * Every answer here is invented by a model call that never sees the rounds before it, so left to
+ * itself it reaches for the single most famous riddle, every time — one group got "un mapa" on
+ * most days. What a chat already had is this table's to remember, and every game that invents an
+ * answer refuses one this chat had recently, the same way `startHangman` refuses a bad word: with
+ * a reason the model can act on.
+ *
+ * Long enough to break the habit, short enough that a good one can come back some day.
+ */
+const REPEAT_DAYS = 90;
+
+const LEADING_ARTICLE = /^(EL|LA|LOS|LAS|LO|UN|UNA|UNOS|UNAS)\s+/;
+
+/**
+ * An answer reduced to what makes it the same answer: folded, punctuation gone, no leading
+ * article — "Un mapa", "el mapa." and "MAPA" are one riddle. Equality only, unlike a guess: here a
+ * near miss is a genuinely different answer, and "sol" must not block "girasol".
+ */
+const answerKey = (s: string): string =>
+  fold(s)
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(LEADING_ARTICLE, "");
+
+/** The bold word a word-of-the-day post leads with — where it lives in entries saved before the
+ * word was also stored as the answer. */
+const boldWord = (prompt: string): string | null =>
+  prompt.match(/\*+([^*\n]{2,40})\*+/)?.[1]?.trim() ?? null;
+
+const nonEmpty = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+
+const answerOf = (type: GameType, data: Record<string, unknown>): string | null => {
+  if (type === "hangman") return nonEmpty(data["secret"]);
+  if (type === "riddle") return nonEmpty(data["answer"]);
+  if (type === "word_of_day") {
+    return nonEmpty(data["answer"]) ?? (data["kind"] === "word" ? boldWord(String(data["prompt"] ?? "")) : null);
+  }
+  return null;
+};
+
+/** What this chat already had, newest first, one per distinct answer. */
+export const recentAnswers = async (chat: string): Promise<string[]> => {
+  const rows = await query<{ type: GameType; data: Record<string, unknown> }>(
+    `select type, data from games
+      where chat = $1 and type in ('word_of_day', 'riddle', 'hangman')
+        and created_at > now() - make_interval(days => $2)
+      order by id desc`,
+    [chat, REPEAT_DAYS],
+  );
+  const seen = new Set<string>();
+  const answers: string[] = [];
+  for (const row of rows) {
+    const answer = answerOf(row.type, row.data);
+    const key = answer && answerKey(answer);
+    if (!answer || !key || seen.has(key)) continue;
+    seen.add(key);
+    answers.push(answer);
+  }
+  return answers;
+};
+
+/** The refusal for an answer this chat already had, or null when it is new here. */
+const repeatOf = async (chat: string, answer: string | null | undefined): Promise<string | null> => {
+  const key = answer ? answerKey(answer) : "";
+  if (!key) return null;
+  const past = await recentAnswers(chat);
+  if (!past.some((a) => answerKey(a) === key)) return null;
+  return `"${answer!.trim()}" ya salio en este chat hace poco. Inventa otra completamente distinta, ni esa ni una variante. Ya salieron: ${past.slice(0, 40).join(", ")}.`;
+};
+
 const activeRow = async (chat: string, type: GameType): Promise<Row | null> => {
   const rows = await query<Row>(
     `select id, chat, type, status, data, started_by
@@ -221,18 +294,32 @@ const guessWhoSaidIt = async (
 
 export type WordOfDayEntry = { kind: "word" | "challenge"; prompt: string; answer?: string };
 
+/** Whether this chat's last word/challenge was a word or a challenge, so the next can be the other. */
+export const lastWordOfDayKind = async (chat: string): Promise<WordOfDayEntry["kind"] | null> => {
+  const rows = await query<{ kind: string | null }>(
+    `select data->>'kind' as kind from games
+      where chat = $1 and type = 'word_of_day'
+      order by id desc limit 1`,
+    [chat],
+  );
+  const kind = rows[0]?.kind;
+  return kind === "word" || kind === "challenge" ? kind : null;
+};
+
 /** Posted content, not a guessed one — starting a new day's entry always supersedes yesterday's. */
 export const startWordOfDay = async (
   chat: string,
   startedBy: string,
   entry: WordOfDayEntry,
-): Promise<void> => {
+): Promise<{ ok: true } | { ok: false; why: string }> => {
+  const repeat = await repeatOf(chat, entry.answer ?? (entry.kind === "word" ? boldWord(entry.prompt) : null));
+  if (repeat) return { ok: false, why: repeat };
   await supersede(chat, "word_of_day");
   await query(
     `insert into games (chat, type, status, data, started_by)
      values ($1, 'word_of_day', 'active', $2::jsonb, $3)`,
     [chat, JSON.stringify({ kind: entry.kind, prompt: entry.prompt, answer: entry.answer ?? null }), startedBy],
-  );
+  );  return { ok: true };
 };
 
 /**
@@ -291,6 +378,8 @@ export const startHangman = async (
       why: "Esa no sirve como palabra de ahorcado: tiene que ser de 3 a 20 letras, sin espacios, numeros ni signos. Inventa una que si cumpla.",
     };
   }
+  const repeat = await repeatOf(chat, word);
+  if (repeat) return { ok: false, why: repeat };
   await supersede(chat, "hangman");
   await query(
     `insert into games (chat, type, status, data, started_by)
@@ -396,13 +485,16 @@ export const startRiddle = async (
   riddle: string,
   answer: string,
   hint?: string,
-): Promise<void> => {
+): Promise<{ ok: true } | { ok: false; why: string }> => {
+  const repeat = await repeatOf(chat, answer);
+  if (repeat) return { ok: false, why: repeat };
   await supersede(chat, "riddle");
   await query(
     `insert into games (chat, type, status, data, started_by)
      values ($1, 'riddle', 'active', $2::jsonb, $3)`,
     [chat, JSON.stringify({ riddle, answer, hint: hint ?? null, attempts: 0 }), startedBy],
   );
+  return { ok: true };
 };
 
 const guessRiddle = async (chat: string, guessText: string): Promise<GuessResult> => {

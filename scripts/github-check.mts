@@ -113,13 +113,13 @@ try {
 
   // ── naming ─────────────────────────────────────────────────────────────
   console.log("\nreading a repository name:");
-  check("a plain pair", github.normalise("Jibaru/wspbot") === "jibaru/wspbot");
+  check("a plain pair", github.normalise("S-kkipie/wspbot") === "s-kkipie/wspbot");
   check(
     "a URL",
-    github.normalise("https://github.com/Crafter-Station/wapi") === "crafter-station/wapi",
+    github.normalise("https://github.com/S-kkipie/WSPBOT") === "s-kkipie/wspbot",
   );
-  check("a .git suffix", github.normalise("Jibaru/wspbot.git") === "jibaru/wspbot");
-  check("trailing slashes", github.normalise("jibaru/wspbot/") === "jibaru/wspbot");
+  check("a .git suffix", github.normalise("S-kkipie/wspbot.git") === "s-kkipie/wspbot");
+  check("trailing slashes", github.normalise("s-kkipie/wspbot/") === "s-kkipie/wspbot");
 
   // ── the allowlist ──────────────────────────────────────────────────────
   console.log("\nthe allowlist:");
@@ -288,7 +288,7 @@ try {
 
   let readThrew = "";
   try {
-    await github.repo("jibaru/wspbot");
+    await github.repo("s-kkipie/wspbot");
   } catch (err) {
     readThrew = err instanceof Error ? err.message : String(err);
   }
@@ -368,7 +368,7 @@ try {
     403,
     "Your current plan does not support GitHub Pages for this repository.",
     "POST",
-    "/repos/kekito-crafter/wspbot-stickers/pages",
+    "/repos/s-kkipie/wspbot-stickers/pages",
   );
   check("the explanation names the fix", planned.includes("public"), `— ${planned}`);
   check("and keeps what GitHub said", planned.includes("plan does not support"));
@@ -383,7 +383,7 @@ try {
    */
   const fineGrained = {
     kind: "fine-grained" as const,
-    login: "kekito-crafter",
+    login: "s-kkipie",
     visible: true,
     granted: false,
     push: false,
@@ -530,11 +530,11 @@ try {
     console.log("  SKIP no token stored — connect an account on /dashboard/github first");
   } else {
     await restore();
-    const repo = await github.repo("crafter-station/wapi");
-    check("it reads a real repository", repo.fullName.toLowerCase() === "crafter-station/wapi");
+    const repo = await github.repo("S-kkipie/wspbot");
+    check("it reads a real repository", repo.fullName.toLowerCase() === "s-kkipie/wspbot");
     check("with the fields the bot reports", typeof repo.stars === "number" && repo.defaultBranch !== "");
 
-    const issues = await github.issues("crafter-station/wapi", { limit: 5 });
+    const issues = await github.issues("S-kkipie/wspbot", { limit: 5 });
     check("and its issues", Array.isArray(issues));
     check(
       "pull requests are marked as such rather than counted as issues",
@@ -543,7 +543,7 @@ try {
 
     let missing = "";
     try {
-      await github.repo("jibaru/this-repository-does-not-exist-9x8y7z");
+      await github.repo("s-kkipie/this-repository-does-not-exist-9x8y7z");
     } catch (err) {
       missing = err instanceof Error ? err.message : String(err);
     }

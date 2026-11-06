@@ -32,6 +32,7 @@
     "video-check": "tsx --conditions=react-server scripts/video-check.mts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.41",
     "@ai-sdk/google": "^4.0.46",
     "@ai-sdk/openai": "^4.0.46",
     "ai": "^7.0.77",

@@ -44,7 +44,7 @@ const adminPasswordHash = (): string | undefined => {
 };
 
 export const config = {
-  wapiBaseUrl: () => optional("WAPI_BASE_URL") ?? "https://api.wapi.crafter.run",
+  wapiBaseUrl: () => optional("WAPI_BASE_URL") ?? "http://api:3001",
 
   /** Session key: messaging, contacts, groups. Not interchangeable with the PAT. */
   wapiApiKey: () => required("WAPI_API_KEY"),
@@ -83,14 +83,28 @@ export const config = {
     }
   },
 
-  /** Where this app is reachable, used to build the Notion OAuth redirect. */
   /**
-   * Who runs this deployment — the person with the switches, the dashboard and the database.
-   * The code is Jibaru's either way; a fork run by someone else must not send people to him.
+   * Who made the bot and runs this deployment — the person with the switches, the dashboard and
+   * the database, and the one the bot calls its creator.
    */
-  ownerName: () => optional("BOT_OWNER_NAME") ?? "Jibaru",
+  ownerName: () => optional("BOT_OWNER_NAME") ?? "Skkippie",
 
-  appUrl: () => (optional("APP_URL") ?? "https://wspbot.crafter.run").replace(/\/$/, ""),
+  /**
+   * The owner's WhatsApp identities, comma-separated digits: the phone number first — the one the
+   * bot may give out — then any LID their messages arrive under. A group sender often comes as a
+   * LID with no phone attached, so the number alone would miss them.
+   */
+  ownerIds: (): string[] =>
+    (optional("BOT_OWNER_IDS") ?? "")
+      .split(",")
+      .map((id) => id.replace(/\D/g, ""))
+      .filter(Boolean),
+
+  /** Whether a sender (a numeric identity, as `mentions.identityKey` gives it) is the owner. */
+  isOwner: (id: string | null | undefined): boolean => !!id && config.ownerIds().includes(id),
+
+  /** Where this app is reachable, used to build the Notion OAuth redirect. */
+  appUrl: () => (optional("APP_URL") ?? "https://wspbot.aido.lat").replace(/\/$/, ""),
 
   /**
    * Notion is optional. With no credentials the Notion tools are not offered at all, rather
@@ -133,7 +147,17 @@ export const config = {
    */
   exaApiKey: () => optional("EXA_API_KEY"),
 
-  /** Any model your account can reach on the selected provider. */
+  /**
+   * Where `claude-*` model ids go (`lib/provider.ts` `chatModel`). Unset means the real Anthropic
+   * API; point it at ccapi (e.g. `http://host.docker.internal:18787/v1`) to run Claude on a
+   * Claude Code subscription instead. Both are only read once some model id is a Claude one.
+   */
+  anthropicBaseUrl: () => optional("ANTHROPIC_BASE_URL"),
+
+  /** The Anthropic API key, or ccapi's local token (`ccapi token`) when the URL points at ccapi. */
+  anthropicApiKey: () => optional("ANTHROPIC_API_KEY"),
+
+  /** Any model your account can reach on the selected provider, or any `claude-*` id. */
   model: () => optional("BOT_MODEL") ?? "gemini-2.5-flash",
 
   /**

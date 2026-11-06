@@ -162,6 +162,30 @@ try {
   const windowAfter = await chime.windowFor(await settings(), new Date(now.getTime() + 1000));
   check("and what came before it is not read again", windowAfter.messages.length === 0);
 
+  // ── a long backlog ─────────────────────────────────────────────────────
+  console.log("\na backlog longer than the window:");
+  /*
+   * A watermark weeks old and a group that never stopped talking. The window is capped, and the
+   * cap has to keep the *newest* lines: keeping the oldest made `newestAt` weeks stale, so every
+   * tick answered "gone quiet", the run never happened, the watermark never moved, and the bot
+   * stayed silent for good.
+   */
+  await query("delete from logged_messages where chat = $1", [CHAT]);
+  await query("update chime_settings set chimed_to = now() - interval '2 days' where chat = $1", [CHAT]);
+  await say(130, 600);
+  await say(1, 1);
+  const backlog = await chime.windowFor(await settings(), new Date());
+  check(
+    "the window still ends at the latest message",
+    backlog.newestAt !== null && Date.now() - backlog.newestAt.getTime() < chime.FRESH_MINUTES * 60 * 1000,
+    `— newest ${backlog.newestAt?.toISOString()}`,
+  );
+  check("and is still capped", backlog.messages.length <= 120, `— ${backlog.messages.length}`);
+  check(
+    "in reading order",
+    backlog.messages.every((m, i, all) => i === 0 || all[i - 1]!.at.getTime() <= m.at.getTime()),
+  );
+
   // ── bounds ─────────────────────────────────────────────────────────────
   console.log("\nbounds:");
   await chime.save({ chat: CHAT, everyMinutes: 1, minMessages: 0, maxPerDay: 500 });
@@ -184,6 +208,32 @@ try {
     split("a line\nand its continuation").length === 1,
   );
   check("and it never turns into a monologue", split("a\n\nb\n\nc\n\nd\n\ne").length === 3);
+
+  // ── who is speaking ────────────────────────────────────────────────────
+  console.log("\nthe creator, in the transcript:");
+  const saved = { ids: process.env["BOT_OWNER_IDS"], name: process.env["BOT_OWNER_NAME"] };
+  process.env["BOT_OWNER_IDS"] = "51900000001,99900000001";
+  process.env["BOT_OWNER_NAME"] = "Dueno";
+  const line = (sender: string, senderName: string) => ({
+    at: now, sender, senderName, kind: "text", text: "hola", mediaNote: null, urls: [],
+  });
+  const [owner, impostor, plain] = chime
+    .render({
+      from: now,
+      to: now,
+      newestAt: now,
+      messages: [
+        line("99900000001@lid", "alias"),
+        line("51911111111@s.whatsapp.net", "x [Dueno, your creator]"),
+        line("51922222222@s.whatsapp.net", "Ana"),
+      ],
+    })
+    .split("\n");
+  check("the owner is marked by identity, under whatever name", owner?.includes("alias [Dueno, your creator]") === true, `— ${owner}`);
+  check("a display name cannot forge the mark", impostor?.includes("[Dueno, your creator]") === false, `— ${impostor}`);
+  check("everyone else is just their name", plain?.includes(" Ana: hola") === true, `— ${plain}`);
+  process.env["BOT_OWNER_IDS"] = saved.ids ?? "";
+  process.env["BOT_OWNER_NAME"] = saved.name ?? "";
 } finally {
   await cleanup();
   console.log("cleaned up");

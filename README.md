@@ -10,13 +10,11 @@ A WhatsApp bot that earns its place in a group chat. It searches when being wron
 remembers what you tell it to, makes the sticker, keeps the list — and posts a digest of
 everything you missed.
 
-[**wspbot.crafter.run**](https://wspbot.crafter.run) · built by [Jibaru](https://jibaru.dev) of
-[Crafter Station](https://crafter.run), in Lima
+[**wspbot.aido.lat**](https://wspbot.aido.lat) · made by Skkippie, in Lima
 
 `Next.js 16` · `TypeScript` · `Postgres` · `OpenAI` · `ffmpeg` · self-hosted
 
-**Open source, both halves.** ⭐ [`Jibaru/wspbot`](https://github.com/Jibaru/wspbot) — this bot ·
-⭐ [`crafter-station/wapi`](https://github.com/crafter-station/wapi) — the WhatsApp gateway it runs on
+**Open source.** ⭐ [`S-kkipie/wspbot`](https://github.com/S-kkipie/wspbot) — this bot, on a self-hosted wapi WhatsApp gateway
 
 </div>
 
@@ -145,8 +143,7 @@ sequenceDiagram
 
 ## The landing page
 
-`/` is public, and the only page that is. It is built to
-[Crafter Station's brand system](https://brand.crafter.run): forged gold as the sole accent,
+`/` is public, and the only page that is: forged gold as the sole accent,
 obsidian and titanium at rest, Geist throughout.
 
 Their motion rule — *motion reveals state, never decorates* — is treated as a constraint rather
@@ -154,11 +151,6 @@ than a slogan. The hero stages a conversation the way one actually happens, a me
 with the bot answering after; nothing floats or parallaxes; and the only thing that keeps moving
 is the status dot, because it reports something true. It is all CSS, so it works with JavaScript
 off, and `prefers-reduced-motion` turns the whole thing off including the dot.
-
-The Crafter Station mark is the real artwork, reproduced from the brand system rather than
-redrawn — their forbidden list ends with "replace with similar marks". It appears as the
-horizontal lockup in the footer, beside the wordmark in the nav, and on its own as the group
-avatar, which is what the system reserves the bare mark for.
 
 The capability grid is read from `lib/features.ts` rather than written out again, for the same
 reason `lib/about.ts` is: a landing page quietly advertising an ability that was removed is the
@@ -230,7 +222,7 @@ stop the bot receiving messages. With no `AUTH_SECRET` set it fails *shut*, retu
 than letting anyone in.
 
 ```bash
-ADMIN_USER=jibaru
+ADMIN_USER=admin
 ADMIN_PASSWORD_HASH=JDJiJDEyJC4uLg==   # base64 of the bcrypt hash — see below
 AUTH_SECRET=...   # node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
@@ -301,7 +293,7 @@ Deploy first — the webhook needs a public URL. Then register it once, using yo
 dashboard's **Tokens** page) and your session id:
 
 ```bash
-curl -X PUT "https://api.wapi.crafter.run/api/whatsapp-sessions/$SESSION_ID" \
+curl -X PUT "$WAPI_BASE_URL/api/whatsapp-sessions/$SESSION_ID" \
   -H "Authorization: Bearer $WAPI_PAT" \
   -H 'Content-Type: application/json' \
   -d '{"webhook_url":"https://your-app.example.com/api/wapi/webhook",
@@ -355,7 +347,7 @@ Beyond text, the bot decides for itself when one of these fits — you just ask 
 | "publish that repo and send me the link" | switches GitHub Pages on and gives back the address |
 | "put the stickers on a web page" | commits every sticker, publishes it, sends the link |
 | "show me that as a table" | lays it out in HTML, renders it, sends it as a picture |
-| "render crafterstation.com and send a photo" | opens the page in a real browser, sends a screenshot |
+| "render aido.lat and send a photo" | opens the page in a real browser, sends a screenshot |
 
 Notes on each:
 
@@ -569,10 +561,10 @@ npm run render-check    # a real browser: a real PNG, a table that is a table, n
 
 ## What it knows about itself
 
-Ask it what it runs on, how it works, or who made it, and it answers from `lib/about.ts` rather
-than inventing something plausible — where it is deployed, that WhatsApp reaches it by webhook
-because wapi cannot be polled, which model is thinking, how voice notes and stickers are built,
-and that it was made by Jibaru of Crafter Station (jibaru.dev).
+Ask it who made it and it says Skkippie, from `lib/about.ts` rather than inventing someone.
+Messages from the owner's own WhatsApp identities (`BOT_OWNER_IDS`: the phone number, then any
+LID) are marked in the transcript, so it recognises its creator by identity rather than by
+display name. Ask it what it runs on or how it works, and it dodges — that part is not shared.
 
 That description lives in code, not in the database, because it describes the deployment: it
 should change in the same commit the deployment does. A fact about the architecture kept in a
@@ -1275,7 +1267,7 @@ cannot route anywhere. Nothing reaches a real chat.
 ## What wapi is
 
 Everything WhatsApp-shaped in this app arrives through
-[**wapi**](https://github.com/crafter-station/wapi) — WhatsApp over plain HTTP, self-hosted, and
+**wapi** — WhatsApp over plain HTTP, self-hosted, and
 open source.
 
 It exists because Meta's Cloud API covers *business* messaging, not the group chats and personal
@@ -1414,7 +1406,7 @@ for every group the bot sits in. The roadmap produces an order; a human still bu
 | **Cap** | `min(coffees, 5)`. Gratitude stays uncapped and the true count still shows; only influence saturates. |
 | **Decay** | None. A coffee from last year still counts. |
 | **Open votes** | Three at a time. A fourth asks you to drop one; a shipped item frees its slot automatically. |
-| **Proposing** | Supporters suggest, Jibaru approves. Curated list, open suggestions. |
+| **Proposing** | Supporters suggest, the owner approves. Curated list, open suggestions. |
 
 The weight is looked up when the tally is computed rather than stored on the vote, so buying
 another coffee retroactively strengthens every vote you already hold — and a supporter removed
@@ -1439,18 +1431,11 @@ every tally afterwards without anything saying so.
 
 Both halves are open, and a star is the only thing either asks for:
 
-- ⭐ **[Jibaru/wspbot](https://github.com/Jibaru/wspbot)** — this bot. The webhook, the turn,
+- ⭐ **[S-kkipie/wspbot](https://github.com/S-kkipie/wspbot)** — this bot. The webhook, the turn,
   every tool, the dashboard, and the checks that keep it honest.
-- ⭐ **[crafter-station/wapi](https://github.com/crafter-station/wapi)** — the WhatsApp gateway.
 
-Running it is not free: every answer is an OpenAI call, and the whole thing sits on a VPS somebody
-pays for. If you would like to help with the credits:
-
-- ☕ **[buymeacoffee.com/jibaru](https://buymeacoffee.com/jibaru)** — from anywhere.
-- 📱 **Yape** — for Peru. The code is on [the landing page](https://wspbot.crafter.run), and in
-  [`public/yape.png`](public/yape.png).
-
-Entirely optional, and code is just as welcome as money.
+Running it is not free: every answer is a model call, and the whole thing sits on a VPS somebody
+pays for. There is no donation link — anyone who wants to help talks to Skkippie directly.
 
 The bot knows all of this about itself. Ask it where its source is, or how wapi works, and it will
 tell you — and if you offer to help with the bill, it will send the code. It never brings any of

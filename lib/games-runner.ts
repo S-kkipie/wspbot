@@ -29,52 +29,82 @@ const TICK_MS = 60 * 1000;
 const g = globalThis as unknown as { wspbotGamesWord?: NodeJS.Timeout };
 
 const WordOfDaySchema = z.object({
-  kind: z
-    .enum(["word", "challenge"])
-    .describe(
-      "'word' for a word-of-the-day (a real word, its meaning, an example). 'challenge' for a short daily challenge or riddle-style acertijo, with a definite answer.",
-    ),
   prompt: z
     .string()
     .describe(
-      "Listo para mandar por WhatsApp, en espanol informal (jerga peruana si encaja), un par de lineas. Para 'word': la palabra en *negrita*, su significado en una linea, y un ejemplo de uso. Para 'challenge': el reto o acertijo planteado, sin revelar la respuesta. Nada de headings ni tablas -- WhatsApp no las muestra.",
+      "Listo para mandar por WhatsApp, en espanol informal (jerga peruana si encaja), un par de lineas. Para una palabra: la palabra en *negrita*, su significado en una linea, y un ejemplo de uso. Para un reto: el reto o acertijo planteado, sin revelar la respuesta. Nada de headings ni tablas -- WhatsApp no las muestra.",
     ),
   answer: z
     .string()
-    .optional()
-    .describe("Solo para 'challenge': la respuesta, para revelarla mas tarde. Omite si no aplica."),
+    .describe("Para una palabra, la palabra misma. Para un reto, su respuesta, para revelarla mas tarde."),
 });
 
 const INSTRUCTIONS = [
   "Eres SkkippIA, y vas a postear la palabra o el reto del dia en un grupo de WhatsApp.",
-  "Alterna el tipo de cosa que sale: a veces una palabra interesante (rebuscada, un peruanismo, algo en otro idioma) con su significado y un ejemplo de uso; otras veces un reto corto o un acertijo con una respuesta concreta.",
+  "Una palabra es algo interesante (rebuscada, un peruanismo, algo en otro idioma) con su significado y un ejemplo de uso; un reto es un desafio corto o un acertijo con una respuesta concreta.",
   "Espanol informal y breve -- esto es un chat de WhatsApp, no un diccionario. Una o dos lineas basta.",
-  "Nunca repitas exactamente lo mismo de una vez a otra; inventa algo fresco cada vez que te lo piden.",
 ].join("\n");
 
 /**
- * Compose one day's entry. Exported so a check script can exercise the shape without going
- * through the tick or a live database — same spirit as `recap-runner.ts` `compose`.
+ * A different corner to start from each day. The model cannot see yesterday, and without a push
+ * somewhere else it lands on the same famous riddle almost every time — the theme is that push.
  */
-export const compose = async (chat: string): Promise<games.WordOfDayEntry> => {
+const THEMES = [
+  "comida peruana", "animales", "cosas de la casa", "la naturaleza", "el cuerpo humano",
+  "el celular y la tecnologia", "musica", "futbol y deportes", "el clima", "la calle y el transporte",
+  "numeros y logica", "palabras del quechua", "jerga limena", "historia del Peru", "ciencia",
+  "el mar y la playa", "el colegio y la universidad", "la chamba", "fiestas y tradiciones",
+  "el tiempo y los relojes", "juegos y videojuegos", "plata y compras", "viajes", "el cine",
+];
+
+/** The well-worn answers the model reaches for first, named so it stops reaching for them. */
+const CLASSICS = "el mapa, la vela, el eco, la sombra, la aguja, el huevo, el silencio, la letra E";
+
+/** Every attempt that repeats something this chat already had is refused and retried this many times. */
+const MAX_ATTEMPTS = 3;
+
+/**
+ * Compose one day's entry. The kind alternates with whatever this chat had last, and the model is
+ * shown every answer the chat already had — it has no other way of knowing. `rejected` carries the
+ * refusal of a previous attempt, when there was one. Exported so a check script can exercise the
+ * shape without going through the tick — same spirit as `recap-runner.ts` `compose`.
+ */
+export const compose = async (chat: string, rejected: string | null = null): Promise<games.WordOfDayEntry> => {
+  const kind = (await games.lastWordOfDayKind(chat)) === "word" ? "challenge" : "word";
+  const past = await games.recentAnswers(chat);
+  const theme = THEMES[Math.floor(Math.random() * THEMES.length)]!;
+
   const result = await generateObject({
     model: chatModel(config.summaryModel()),
     schema: WordOfDaySchema,
     system: INSTRUCTIONS,
-    prompt: "Dame la palabra o el reto de hoy.",
+    prompt: [
+      kind === "word" ? "Hoy toca una palabra." : `Hoy toca un reto. Que sea tuyo, no un acertijo clasico (${CLASSICS}).`,
+      `Tema de hoy, para salir de lo de siempre: ${theme}.`,
+      ...(past.length ? [`Ya salieron en este grupo, no repitas ninguna ni una variante: ${past.join(", ")}.`] : []),
+      ...(rejected ? [`El intento anterior no sirvio: ${rejected}`] : []),
+    ].join("\n"),
   });
 
   await usage.record({ kind: "summary", model: config.summaryModel(), chat, usage: result.usage });
 
-  return result.object;
+  return { kind, ...result.object };
 };
 
 const HEADER = "*Palabra/reto del dia*";
 
 const run = async (due: games.WordOfDayDue): Promise<void> => {
-  const entry = await compose(due.chat);
-  await games.startWordOfDay(due.chat, "SkkippIA", entry);
-  await wapi.sendText(due.chat, `${HEADER}\n\n${entry.prompt}`);
+  let rejected: string | null = null;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const entry = await compose(due.chat, rejected);
+    const started = await games.startWordOfDay(due.chat, "SkkippIA", entry);
+    if (started.ok) {
+      await wapi.sendText(due.chat, `${HEADER}\n\n${entry.prompt}`);
+      return;
+    }
+    rejected = started.why;
+  }
+  throw new Error(`every attempt repeated something this chat already had — ${rejected}`);
 };
 
 const tick = async (): Promise<void> => {

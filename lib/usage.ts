@@ -30,9 +30,14 @@ type AnyUsage = {
 /**
  * USD per million tokens. Gemini rates per ai.google.dev/gemini-api/docs/pricing (2026-09) —
  * note the 3.x-flash promo runs through 2026-12-31 and roughly doubles after. OpenAI rates as
- * before. Override with env if they move.
+ * before. Claude rates are Anthropic API list prices: through ccapi the tokens come out of a
+ * Claude Code plan instead, so there they read as what the same traffic would cost on the API.
+ * Override with env if they move.
  */
 const RATES: Record<string, { input: number; output: number; cached?: number }> = {
+  "claude-haiku-4-5": { input: 1.0, output: 5.0, cached: 0.1 },
+  "claude-sonnet-5-5": { input: 2.0, output: 10.0, cached: 0.2 },
+  "claude-opus-5-5": { input: 4.0, output: 20.0, cached: 0.2 },
   "gpt-5.6-sol": { input: 5.0, output: 30.0 },
   "gpt-5.6-terra": { input: 2.0, output: 12.0 },
   "gpt-5.6-luna": { input: 0.2, output: 1.2 },

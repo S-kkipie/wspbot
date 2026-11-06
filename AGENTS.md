@@ -11,7 +11,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 # wspbot
 
 A WhatsApp bot that answers when tagged in a group. Next.js app deployed as a Docker container on
-a Dokploy VPS at `wspbot.crafter.run`. Built by Jibaru of Crafter Station (jibaru.dev).
+a VPS at `wspbot.aido.lat`. Made and run by Skkippie.
 
 ## Shape
 
@@ -77,7 +77,6 @@ lib/auth.ts                      bcrypt at sign-in, signed cookie thereafter
 app/login/                       sign-in page and its server action
 app/page.tsx                     the public landing page (the only ungated route)
 app/landing.css                  its brand styles, scoped under .lp
-app/crafter-mark.tsx             the real Crafter Station mark and horizontal lockup
 app/dashboard/                   one route per section, each with its own actions.ts
 app/dashboard/layout.tsx         shell + nav; nav.tsx is the only client component
 public/                          generated icon set; rebuild from public/icon.config.json
@@ -298,9 +297,6 @@ like a simplification opportunity.
   covers both stylesheets, and it honours `:not()` — stripping it made
   `.panel button[type="submit"]:not(.linky)` match a `.linky` button and report the wrong
   colour, which is a resolver that passes while lying.
-- **The Crafter Station mark is reproduced, never redrawn.** `app/crafter-mark.tsx` carries the
-  real path from brand.crafter.run; the brand's forbidden list ends with "replace with similar
-  marks". Each instance needs a unique gradient id, which is why callers pass one.
 - **The landing page is the only ungated route, and it is excluded by `$`, not by an
   allowlist.** The matcher still gates everything by default and names the exceptions, so a page
   added tomorrow is behind the sign-in unless somebody deliberately opens it. Inverting that to

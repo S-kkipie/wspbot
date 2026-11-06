@@ -10,9 +10,8 @@ const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 
 /**
- * The icon set in `public/` is generated, not drawn by hand — regenerate it with
- * `node .claude/skills/icongen/scripts/icongen.mjs --config public/icon.config.json`,
- * which carries every resolved setting, rather than by reconstructing the flags.
+ * The icon set in `public/` is generated, not drawn by hand. `public/icon.config.json` carries
+ * every setting it was generated with — regenerate from that rather than by reconstructing it.
  */
 
 export const metadata: Metadata = {

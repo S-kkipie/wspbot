@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { config } from "@/lib/config";
 import { FEATURES, ALWAYS } from "@/lib/features";
 import * as roadmap from "@/lib/roadmap";
-import { CrafterLockup } from "./crafter-mark";
 
 /**
  * wspbot's own mark — the same speech bubble as the favicon and the app icon, drawn inline.
@@ -36,8 +34,8 @@ import "./landing.css";
 /**
  * The public landing page — the one page in this app that is not behind the sign-in.
  *
- * Built to Crafter Station's brand system: forged gold as the only accent, obsidian and titanium
- * as the resting state, Geist throughout, and their motion rule, which is a real constraint
+ * Forged gold as the only accent, obsidian and titanium as the resting state, Geist throughout,
+ * and one motion rule, which is a real constraint
  * rather than a slogan — *motion reveals state, never decorates*. So the hero stages a
  * conversation the way one actually happens rather than animating for its own sake, and the only
  * thing that keeps moving is the status dot, because that reports something true.
@@ -50,12 +48,12 @@ import "./landing.css";
 export const metadata: Metadata = {
   title: "wspbot — tag it, it answers",
   description:
-    "A WhatsApp bot for group chats. It searches, remembers, makes stickers, keeps the checklist, and posts a digest of what you missed. Built by Crafter Station.",
+    "A WhatsApp bot for group chats. It searches, remembers, makes stickers, keeps the checklist, and posts a digest of what you missed. Made by Skkippie.",
   openGraph: {
     title: "wspbot — tag it, it answers",
     description:
       "A WhatsApp bot for group chats. It searches, remembers, makes stickers, keeps the checklist, and posts a digest of what you missed.",
-    url: "https://wspbot.crafter.run",
+    url: "https://wspbot.aido.lat",
     siteName: "wspbot",
     type: "website",
   },
@@ -69,21 +67,14 @@ export const metadata: Metadata = {
  */
 export const revalidate = 300;
 
-const SOURCE = "https://github.com/Jibaru/wspbot";
-const WAPI = "https://github.com/crafter-station/wapi";
-const COFFEE = "https://buymeacoffee.com/jibaru";
+const SOURCE = "https://github.com/S-kkipie/wspbot";
 
-/** Both halves are open. The bot is the interesting half; the gateway is the hard one. */
+/** The bot is open source. */
 const REPOS: { name: string; href: string; body: string }[] = [
   {
-    name: "Jibaru/wspbot",
+    name: "S-kkipie/wspbot",
     href: SOURCE,
     body: "This bot. The webhook, the turn, every tool, the dashboard and the checks that keep it honest.",
-  },
-  {
-    name: "crafter-station/wapi",
-    href: WAPI,
-    body: "WhatsApp over plain HTTP, self-hosted. Meta's Cloud API only covers business messaging, so reaching an ordinary group chat means driving a real WhatsApp client — which is what this does, behind a stable REST interface.",
   },
 ];
 
@@ -167,7 +158,7 @@ export default async function Landing() {
         <section className="lp-hero">
           <div className="lp-hero-copy">
             <p className="lp-eyebrow" style={{ "--i": 0 } as React.CSSProperties}>
-              Crafter Station · WhatsApp
+              Skkippie · WhatsApp
             </p>
             <h1 className="lp-display" style={{ "--i": 1 } as React.CSSProperties}>
               Tag it.
@@ -189,7 +180,7 @@ export default async function Landing() {
             </div>
             <p className="lp-status" style={{ "--i": 4 } as React.CSSProperties}>
               <span className="lp-pulse" aria-hidden="true" />
-              running at wspbot.crafter.run
+              running at wspbot.aido.lat
             </p>
           </div>
 
@@ -325,44 +316,13 @@ export default async function Landing() {
             ))}
           </ul>
 
-          <div className="lp-chip">
-            {/* Plain img: one static asset, and next/image would only add a proxy in front of it. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/yape.png" alt="Yape QR code for Jibaru" width={148} height={148} />
-            <div>
-              <h3>Or help with the bill.</h3>
-              <p>
-                Every answer is a {config.aiProvider() === "google" ? "Gemini" : "OpenAI"} call
-                and the whole thing sits on a VPS somebody pays for. If you would like to chip in
-                towards the credits: the code is Jibaru&apos;s
-                personal Yape, and there is a coffee link for everywhere Yape does not reach.
-                Entirely optional, and code is just as welcome as money.
-              </p>
-              <a className="lp-coffee" href={COFFEE} target="_blank" rel="noreferrer">
-                Buy me a coffee
-              </a>
-            </div>
-          </div>
         </section>
 
         <footer className="lp-footer">
-          <span className="lp-footer-brand">
-            <CrafterLockup id="footer" size={18} />
-          </span>
-          <span>
-            Built by{" "}
-            <a href="https://jibaru.dev" target="_blank" rel="noreferrer">
-              Jibaru
-            </a>{" "}
-            of{" "}
-            <a href="https://crafter.run" target="_blank" rel="noreferrer">
-              Crafter Station
-            </a>
-            , in Lima.
-          </span>
+          <span>Made by Skkippie, in Lima.</span>
           <span>
             <a href={SOURCE} target="_blank" rel="noreferrer">
-              github.com/Jibaru/wspbot
+              github.com/S-kkipie/wspbot
             </a>
           </span>
         </footer>

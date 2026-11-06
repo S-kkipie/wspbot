@@ -36,6 +36,7 @@ import { fetchDecrypted } from "./inbound-media";
 import { fetchMedia } from "./fetch-media";
 import { toWhatsAppVideo } from "./video";
 import type { Media, Quoted } from "./mentions";
+import { speaker } from "./owner";
 
 /**
  * The brain: one model turn per tagged message, with web search, memory, and the ability to
@@ -1268,7 +1269,7 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
     description:
       "Look up a repository on GitHub: what it is, its language, stars, open issue count, when it was last pushed. Takes owner/name, or a github.com link.",
     inputSchema: z.object({
-      repo: z.string().describe('Like "crafter-station/wapi", or the URL of the repository.'),
+      repo: z.string().describe('Like "S-kkipie/wspbot", or the URL of the repository.'),
     }),
     execute: async ({ repo }) => {
       try {
@@ -1284,7 +1285,7 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
     description:
       "List issues on a repository. Pull requests are marked as such in the result — do not report them as issues.",
     inputSchema: z.object({
-      repo: z.string().describe('Like "Jibaru/wspbot".'),
+      repo: z.string().describe('Like "S-kkipie/wspbot".'),
       state: z.enum(["open", "closed", "all"]).optional().describe("Open by default."),
       limit: z.number().int().optional().describe("Up to 50. Ten or so reads well in a chat."),
     }),
@@ -1332,7 +1333,7 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
     description:
       "Open an issue on a repository. Only works on repositories this deployment has been told it may write to, and it is refused otherwise — that refusal is a setting, not a mistake to work around. Write the issue properly: a title somebody could scan, and a body with what was asked, by whom, and anything they said that a maintainer would need.",
     inputSchema: z.object({
-      repo: z.string().describe('Like "Jibaru/wspbot".'),
+      repo: z.string().describe('Like "S-kkipie/wspbot".'),
       title: z.string().describe("One line. Specific — not 'bug' or 'idea'."),
       body: z.string().optional().describe("Markdown. Say what is being asked and why."),
       labels: z.array(z.string()).optional().describe("Only labels that already exist there."),
@@ -1409,7 +1410,7 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
     description:
       "Make an existing repository public, or private again. Making one public is refused unless this deployment allows public repositories — that is a setting somebody took in advance, not something to work around. Use it when a repository has to be published as a website, since GitHub Pages needs a public repository on a free plan.",
     inputSchema: z.object({
-      repo: z.string().describe('Like "kekito-crafter/my-site".'),
+      repo: z.string().describe('Like "S-kkipie/my-site".'),
       visibility: z.enum(["public", "private"]),
     }),
     execute: async ({ repo, visibility }) => {
@@ -1431,7 +1432,7 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
     description:
       "Publish a repository as a website with GitHub Pages, and give back its public address. Asking for a repository that is already published returns the same address and requests a fresh build, so it is also the way to answer 'what is the URL?' or 'rebuild it'.",
     inputSchema: z.object({
-      repo: z.string().describe('Like "kekito-crafter/my-site".'),
+      repo: z.string().describe('Like "S-kkipie/my-site".'),
       branch: z
         .string()
         .optional()
@@ -1471,7 +1472,7 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
     description:
       "Write text files into a repository as a single commit — an index.html for a site, a README, a data file, anything you can write out. Existing files at those paths are replaced; everything else in the repository is left alone. Combine it with github_pages to publish a page you have written.",
     inputSchema: z.object({
-      repo: z.string().describe('Like "kekito-crafter/my-site".'),
+      repo: z.string().describe('Like "S-kkipie/my-site".'),
       files: z
         .array(
           z.object({
@@ -1845,7 +1846,7 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
 
   start_word_of_day: tool({
     description:
-      "Post today's word-of-the-day or daily challenge, which you write yourself. Use when someone asks for one. For a word: invent a real, interesting word (a rare one, a peruanismo, or one from another language), its meaning in one line, and an example. For a challenge: a short task or acertijo, with a definite answer if it has one. Ends whatever word/challenge was posted before in this chat.",
+      "Post today's word-of-the-day or daily challenge, which you write yourself. Use when someone asks for one. For a word: invent a real, interesting word (a rare one, a peruanismo, or one from another language), its meaning in one line, and an example. For a challenge: a short task or acertijo of your own, not a well-known classic, with a definite answer if it has one. Ends whatever word/challenge was posted before in this chat. Refuses a word or answer this chat already had, listing what to avoid — then invent a different one and call it again.",
     inputSchema: z.object({
       kind: z.enum(["word", "challenge"]),
       prompt: z
@@ -1857,10 +1858,13 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
       answer: z
         .string()
         .optional()
-        .describe("For a challenge with a concrete answer, the answer — kept hidden until revealed."),
+        .describe(
+          "For a word, the word itself. For a challenge with a concrete answer, the answer — kept hidden until revealed.",
+        ),
     }),
     execute: async ({ kind, prompt, answer }) => {
-      await games.startWordOfDay(turn.chat, turn.senderName, { kind, prompt, answer });
+      const result = await games.startWordOfDay(turn.chat, turn.senderName, { kind, prompt, answer });
+      if (!result.ok) return result.why;
       return `Saved. Post this: ${prompt}`;
     },
   }),
@@ -1881,14 +1885,15 @@ const toolsFor = (turn: Turn, sent: string[]) => ({
 
   start_riddle: tool({
     description:
-      "Start an adivinanza (riddle) in this chat. Invent the riddle and its answer yourself. Never reveal the answer in your reply. Ends any riddle already running here. The answer is kept in the database, not in your memory — always use `guess_game` to check a guess, even for a riddle you invented yourself this same turn.",
+      "Start an adivinanza (riddle) in this chat. Invent the riddle and its answer yourself — your own, not a well-known classic. Never reveal the answer in your reply. Ends any riddle already running here. Refuses an answer this chat already had, listing what to avoid — then invent a different one and call it again. The answer is kept in the database, not in your memory — always use `guess_game` to check a guess, even for a riddle you invented yourself this same turn.",
     inputSchema: z.object({
       riddle: z.string().min(5).describe("The riddle text, ready to post."),
       answer: z.string().min(1).describe("The answer. Kept hidden until someone gets it or you reveal it."),
       hint: z.string().optional().describe("An optional hint, given out only if you choose to share it."),
     }),
     execute: async ({ riddle, answer, hint }) => {
-      await games.startRiddle(turn.chat, turn.senderName, riddle, answer, hint);
+      const result = await games.startRiddle(turn.chat, turn.senderName, riddle, answer, hint);
+      if (!result.ok) return result.why;
       return `Started. Post the riddle: ${riddle}`;
     },
   }),
@@ -1947,7 +1952,7 @@ const buildUserContent = async (
   // Nobody is speaking in an unprompted turn; the text is a note to the bot, not a message.
   if (turn.unprompted) return turn.text;
   // In a group, who is speaking changes the answer, so it has to be in the message itself.
-  const said = turn.isGroup ? `${turn.senderName}: ${turn.text}` : turn.text;
+  const said = turn.isGroup ? `${speaker(turn.senderName, turn.userId)}: ${turn.text}` : turn.text;
   // With "follows what you point at" off, a reply is just its own words.
   if (!turn.quoted || !on.has("quoted")) return said;
 

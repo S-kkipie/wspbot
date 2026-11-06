@@ -14,8 +14,14 @@ services:
       # Gemini grounding sub-call instead.
       EXA_API_KEY: ${EXA_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Optional: where claude-* model ids go. Unset = the Anthropic API; see .env.example.
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       BOT_MODEL: ${BOT_MODEL}
       BOT_EFFORT: ${BOT_EFFORT}
+      # Who made and runs the bot: the name it calls its creator, and their WhatsApp identities.
+      BOT_OWNER_NAME: ${BOT_OWNER_NAME:-}
+      BOT_OWNER_IDS: ${BOT_OWNER_IDS:-}
       DATABASE_URL: ${DATABASE_URL}
       WAPI_BASE_URL: ${WAPI_BASE_URL}
       WAPI_API_KEY: ${WAPI_API_KEY}

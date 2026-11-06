@@ -1,6 +1,7 @@
 import "server-only";
 import { query } from "./db";
 import { config } from "./config";
+import { speaker } from "./owner";
 
 /**
  * Chiming in: saying something nobody asked for.
@@ -248,6 +249,8 @@ export type Window = {
   to: Date;
   messages: {
     at: Date;
+    /** The sender's JID, so the owner can be recognised by identity rather than by name. */
+    sender: string | null;
     senderName: string | null;
     kind: string;
     text: string;
@@ -264,22 +267,33 @@ export const windowFor = async (settings: Settings, until: Date): Promise<Window
 
   const rows = await query<{
     at: Date;
+    sender: string | null;
     sender_name: string | null;
     kind: string;
     text: string;
     media_note: string | null;
     urls: string[];
   }>(
-    `select at, sender_name, kind, text, media_note, urls
-       from logged_messages
-      where chat = $1 and at > $2 and at <= $3
-      order by at
-      limit $4`,
+    /*
+     * The newest MAX_MESSAGES, not the oldest. With a backlog past the cap, the oldest made
+     * `newestAt` days stale, `holdReason` said "gone quiet" forever, the run never came and the
+     * watermark never moved — a group that kept talking silenced the bot for good. Read back in
+     * order below so the transcript still reads top to bottom.
+     */
+    `select * from (
+       select at, sender, sender_name, kind, text, media_note, urls
+         from logged_messages
+        where chat = $1 and at > $2 and at <= $3
+        order by at desc
+        limit $4
+     ) newest
+     order by at`,
     [settings.chat, from, until, MAX_MESSAGES],
   );
 
   const messages = rows.map((r) => ({
     at: r.at,
+    sender: r.sender,
     senderName: r.sender_name,
     kind: r.kind,
     text: r.text,
@@ -312,7 +326,7 @@ const clock = (at: Date): string =>
 export const render = (window: Window): string =>
   window.messages
     .map((m) => {
-      const who = m.senderName ?? "someone";
+      const who = speaker(m.senderName, m.sender);
       const body =
         m.text.trim() ||
         (m.mediaNote ? `[sent a picture: ${m.mediaNote}]` : `[sent ${m.kind === "text" ? "something" : `a ${m.kind}`}]`);

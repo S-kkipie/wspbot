@@ -4,6 +4,7 @@ import { generateImage, generateSpeech, generateText, tool } from "ai";
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { config } from "./config";
 
 /**
@@ -17,7 +18,27 @@ import { config } from "./config";
  */
 const google = createGoogleGenerativeAI({ apiKey: config.geminiApiKey() ?? "" });
 
+/**
+ * Claude, over any Anthropic Messages endpoint — the real API, or a local stand-in for it such as
+ * ccapi. Unlike the two above it is not an `AI_PROVIDER` value: Anthropic has no image or speech
+ * models, so drawn stickers, voice notes and grounded search stay on the provider `AI_PROVIDER`
+ * names, and only the text models move. `chatModel` routes any `claude-*` id here instead.
+ */
+const anthropic = createAnthropic({
+  baseURL: config.anthropicBaseUrl(),
+  apiKey: config.anthropicApiKey(),
+});
+
 const isGoogle = () => config.aiProvider() === "google";
+
+const isClaude = (id: string) => id.startsWith("claude-");
+
+/**
+ * The Gemini model the grounding sub-call runs on. It is `BOT_MODEL` while that is a Gemini
+ * model; once `BOT_MODEL` is a Claude id, `google()` cannot run it, so a cheap flash model stands
+ * in — the sub-call only searches and summarises, it never sees the conversation.
+ */
+const groundingModel = () => (isClaude(config.model()) ? "gemini-2.5-flash" : config.model());
 
 /**
  * A minimal stand-in for the AI SDK's own (internal, unexported) `JSONObject` — just enough
@@ -27,8 +48,9 @@ const isGoogle = () => config.aiProvider() === "google";
  */
 type JsonRecord = { [key: string]: string | number | boolean | null | JsonRecord | undefined };
 
-/** Any model id the selected provider can reach. */
+/** Any model id the selected provider can reach, or any `claude-*` id over the Anthropic endpoint. */
 export function chatModel(id: string) {
+  if (isClaude(id)) return anthropic(id);
   return isGoogle() ? google(id) : openai(id);
 }
 
@@ -36,6 +58,9 @@ export function chatModel(id: string) {
  * `BOT_EFFORT` mapped onto whatever reasoning knob the provider actually exposes. OpenAI takes a
  * named tier; Gemini takes a thinking-token budget, so the tiers below are a rough equivalence,
  * not a translation — there is no exact mapping between the two.
+ *
+ * A Claude model ignores both: options are keyed by provider, so `@ai-sdk/anthropic` never reads
+ * them, and the reply runs without extended thinking — which is what a chat reply wants anyway.
  */
 export function reasoningProviderOptions(effort: string): Record<string, JsonRecord> {
   if (isGoogle()) {
@@ -113,7 +138,7 @@ async function exaSearch(searchQuery: string): Promise<string> {
  */
 async function groundedSearch(searchQuery: string): Promise<string> {
   const result = await generateText({
-    model: google(config.model()),
+    model: google(groundingModel()),
     // Same reason as exaSearch: a stalled grounding sub-call must abort rather than hang the turn.
     abortSignal: AbortSignal.timeout(20_000),
     prompt:
